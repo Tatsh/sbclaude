@@ -9,7 +9,7 @@ import os
 import tempfile
 
 from sbclaude import container
-import docker
+import docker.errors
 import pytest
 
 if TYPE_CHECKING:

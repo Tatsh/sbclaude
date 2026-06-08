@@ -23,6 +23,7 @@ import sys
 import tempfile
 
 import docker
+import docker.errors
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
