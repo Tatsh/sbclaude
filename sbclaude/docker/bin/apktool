@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Launcher for the host-mounted apktool.jar (mounted read-only at /opt/apktool).
+exec java -jar /opt/apktool/apktool.jar "$@"

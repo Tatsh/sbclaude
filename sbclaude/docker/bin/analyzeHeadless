@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Convenience launcher for Ghidra's headless analyzer.
+# The host package ships the support scripts WITHOUT the execute bit and owned
+# by 'nobody', so they must be invoked through bash (see CREATING_A_GHIDRA_PROJECT.md).
+exec bash /usr/share/ghidra/support/analyzeHeadless "$@"

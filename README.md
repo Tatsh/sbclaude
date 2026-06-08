@@ -1,0 +1,192 @@
+# claude-box
+
+<!-- WISWA-GENERATED-README:START -->
+
+[![Python versions](https://img.shields.io/pypi/pyversions/sbclaude.svg?color=blue&logo=python&logoColor=white)](https://www.python.org/)
+[![PyPI - Version](https://img.shields.io/pypi/v/sbclaude)](https://pypi.org/project/sbclaude/)
+[![GitHub tag (with filter)](https://img.shields.io/github/v/tag/Tatsh/sbclaude)](https://github.com/Tatsh/sbclaude/tags)
+[![License](https://img.shields.io/github/license/Tatsh/sbclaude)](https://github.com/Tatsh/sbclaude/blob/master/LICENSE.txt)
+[![GitHub commits since latest release (by SemVer including pre-releases)](https://img.shields.io/github/commits-since/Tatsh/sbclaude/v0.0.1/master)](https://github.com/Tatsh/sbclaude/compare/v0.0.1...master)
+[![CodeQL](https://github.com/Tatsh/sbclaude/actions/workflows/codeql.yml/badge.svg)](https://github.com/Tatsh/sbclaude/actions/workflows/codeql.yml)
+[![QA](https://github.com/Tatsh/sbclaude/actions/workflows/qa.yml/badge.svg)](https://github.com/Tatsh/sbclaude/actions/workflows/qa.yml)
+[![Tests](https://github.com/Tatsh/sbclaude/actions/workflows/tests.yml/badge.svg)](https://github.com/Tatsh/sbclaude/actions/workflows/tests.yml)
+[![Coverage Status](https://coveralls.io/repos/github/Tatsh/sbclaude/badge.svg?branch=master)](https://coveralls.io/github/Tatsh/sbclaude?branch=master)
+[![Dependabot](https://img.shields.io/badge/Dependabot-enabled-blue?logo=dependabot)](https://github.com/dependabot)
+[![Documentation Status](https://readthedocs.org/projects/sbclaude/badge/?version=latest)](https://sbclaude.readthedocs.org/?badge=latest)
+[![mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
+[![uv](https://img.shields.io/badge/uv-261230?logo=astral)](https://docs.astral.sh/uv/)
+[![pytest](https://img.shields.io/badge/pytest-zz?logo=Pytest&labelColor=black&color=black)](https://docs.pytest.org/en/stable/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Downloads](https://static.pepy.tech/badge/sbclaude/month)](https://pepy.tech/project/sbclaude)
+[![Stargazers](https://img.shields.io/github/stars/Tatsh/sbclaude?logo=github&style=flat)](https://github.com/Tatsh/sbclaude/stargazers)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
+[![Prettier](https://img.shields.io/badge/Prettier-black?logo=prettier)](https://prettier.io/)
+
+[![@Tatsh](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fpublic.api.bsky.app%2Fxrpc%2Fapp.bsky.actor.getProfile%2F%3Factor=did%3Aplc%3Auq42idtvuccnmtl57nsucz72&query=%24.followersCount&label=Follow+%40Tatsh&logo=bluesky&style=social)](https://bsky.app/profile/Tatsh.bsky.social)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Tatsh-black?logo=buymeacoffee)](https://buymeacoffee.com/Tatsh)
+[![Libera.Chat](https://img.shields.io/badge/Libera.Chat-Tatsh-black?logo=liberadotchat)](irc://irc.libera.chat/Tatsh)
+[![Mastodon Follow](https://img.shields.io/mastodon/follow/109370961877277568?domain=hostux.social&style=social)](https://hostux.social/@Tatsh)
+[![Patreon](https://img.shields.io/badge/Patreon-Tatsh2-F96854?logo=patreon)](https://www.patreon.com/Tatsh2)
+
+<!-- WISWA-GENERATED-README:STOP -->
+
+`sbclaude` runs **Claude Code** inside a throwaway Docker container with the bash sandbox
+and permission prompts **disabled**, against a configurable set of host bind mounts. The
+container stores nothing of its own (`--rm`); everything lives on the host. You only ever
+invoke `sbclaude` — it manages its own images and containers via the Docker SDK.
+
+There are two images, built on demand:
+
+| Image         | Contents                                                         | Use             |
+| ------------- | ---------------------------------------------------------------- | --------------- |
+| `sbclaude`    | Debian slim + git/ripgrep, runs the host-mounted `claude` binary | everyday coding |
+| `sbclaude-re` | the above **plus** a mobile reverse-engineering toolchain        | APK / native RE |
+
+## How it works
+
+- The `claude` executable is **not installed** in the image. It is a self-contained
+  native binary (Node is bundled in), so the host copy is bind-mounted read-only at
+  run time — the image always tracks whatever version the host has. (Only glibc ≥ 2.17
+  is needed, which is why the base is Debian, not Alpine/musl.)
+- Your identity is **mirrored**: `UID/GID/USER/HOME` are passed in and an entrypoint
+  recreates that user inside the container. This means:
+  - mounted `~/.claude` files (incl. the `0600` `.credentials.json`) are owned correctly;
+  - **paths resolve identically** — a host path you paste into a prompt
+    (`/home/you/dev/foo`) is bind-mounted at that _same_ absolute path inside the box.
+- `--dangerously-skip-permissions` is passed (hence the non-root user — that flag
+  refuses root), and a **patched copy** of your `settings.json` is mounted over the
+  in-container one with `sandbox.enabled=false`, `skipDangerousModePermissionPrompt=true`
+  (no bypass dialog) and `tui="fullscreen"`. **Your real settings file is never modified.**
+- Images **auto-build on first use** and **rebuild automatically** when the packaged
+  Dockerfiles/entrypoint change (tracked via a content-hash label).
+
+## Install
+
+```sh
+uv tool install .         # or: pipx install .
+# images build themselves on first `sbclaude run`; or pre-build:
+sbclaude build
+```
+
+## Usage
+
+```sh
+sbclaude                          # run claude; cwd is the project (writable)
+sbclaude run -p ~/dev/foo         # explicit project dir (writable, becomes workdir)
+sbclaude run -r /data -w ~/scratch   # extra read-only / read-write mounts
+sbclaude run --re --x11           # RE image + Ghidra/Android tools + GUI passthrough
+sbclaude run -- --version         # everything after -- goes to claude
+sbclaude ls                       # list running sbclaude containers
+sbclaude stop [--all]             # stop the current project's box (or all)
+sbclaude shell                    # root debug shell inside the running box
+sbclaude build [--no-re] [--no-cache]   # (re)build the images
+sbclaude delete-image             # remove the sbclaude images
+sbclaude config                   # show the config file path
+```
+
+### `run` flags
+
+| Flag             | Effect                                                                         |
+| ---------------- | ------------------------------------------------------------------------------ |
+| `--re`           | use `sbclaude-re` and enable `--ghidra` + `--android`                          |
+| `--ghidra`       | mount host Ghidra (`/usr/share/ghidra`) read-only                              |
+| `--android`      | mount Android SDK + `~/.android` + `/dev/kvm` (adb/emulator)                   |
+| `--usb`          | expose `/dev/bus/usb` for adb over USB                                         |
+| `--x11`          | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator) |
+| `--net bridge`   | isolate the box's network (default is `host` — `localhost` = your host)        |
+| `-r/-w/-p/-n/-i` | extra ro/rw mount, project, container name, image override                     |
+
+## Configuration
+
+TOML at `~/.config/sbclaude/config.toml` (path from `platformdirs`; override with
+`$CLAUDE_BOX_CONFIG`). All keys optional:
+
+```toml
+default_flags = ["--re", "--x11"] # applied to every run
+network = "host"                  # default; "bridge" to isolate the box's network
+# image = "sbclaude-re:latest"       # force an image
+pass_env = ["AWS_PROFILE", "AWS_REGION"]           # forward these host vars into the box
+ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"] # read-only mounts (globs + ~ ok)
+rw = []                                            # the project dir is always rw automatically
+[env] # inject fixed vars (e.g. Amazon Bedrock)
+CLAUDE_CODE_USE_BEDROCK = "1"
+```
+
+`ro`/`rw` accept **globs** (`~/dev*` → every matching dir) and `~`; non-matching or
+missing paths are dropped. Every path is mounted at its real absolute path, so a host
+path you paste into a prompt resolves inside the box. The project (cwd or `-p`) is always
+read-write and overlays any read-only parent (e.g. `~/dev` ro + `~/dev/proj` rw → `proj`
+is writable).
+
+**Environment variables** — inject with the `[env]` table, forward host values by name
+with `pass_env`, or per-run with `-e KEY=VALUE` (precedence: `[env]` < `pass_env` < `-e`).
+This is how you point the box at a different backend such as **Amazon Bedrock**
+(`CLAUDE_CODE_USE_BEDROCK=1` + your `AWS_*` vars; mount `~/.aws` via `ro` if you use
+profiles).
+
+**Alternate config dir** — if `CLAUDE_CONFIG_DIR` is set on the host, sbclaude mounts that
+directory (its `.claude.json`, `settings.json`, history) and points claude at it inside the
+box instead of `~/.claude`.
+
+## MCP servers
+
+MCP server configs live in your mounted `~/.claude.json`, so they carry into the box — but
+the server **command must be runnable inside the container**. A host Python _venv_ won't
+work: its `bin/python` symlinks to a host-only interpreter (e.g. `/usr/bin/python3.13`),
+which doesn't exist in the box → `ENOENT`. The image ships **Python 3 (with the `mcp` SDK)
+and `uv`**, so point the command at one of:
+
+- `uv run /abs/path/to/server.py` — best: reads the script's PEP 723 deps, works on the
+  host too. Example: `claude mcp add ghidra -- uv run ~/dev/ghidra-mcp/bridge_mcp_ghidra.py`.
+- `/usr/bin/python3 /abs/path/to/server.py` — the container's Python (has `mcp`
+  pre-installed); container-only.
+
+A server that talks to a process on the host (e.g. a Ghidra GUI on `localhost`) works out
+of the box because the box defaults to host networking; pass `--net bridge` only if you
+want to isolate it.
+
+## RE toolchain (`--re`)
+
+Mounted from the host (your exact versions): **Ghidra** (`analyzeHeadless`, `ghidraRun`),
+**Android SDK** (`adb`, `emulator`, `sdkmanager`, `avdmanager`), **jadx**, **apktool**,
+plus `~/.android` (adb keys + AVDs) and `/dev/kvm` for emulator acceleration.
+
+Installed in the image: **Temurin JDK 21** (Ghidra 12 needs it), **build-essential** +
+binutils, **frida** + frida-tools (pinned to the host version), **mitmproxy**,
+**dex2jar**, **baksmali/smali**, and the X11/GL/audio libs the mounted GUI binaries need.
+
+```sh
+sbclaude run --re --x11 -p ~/dev/some-apk-re
+#   inside: jadx -d work/jadx-out base/classes*.dex
+#           apktool d base -o work/axml-decoded
+#           analyzeHeadless ~/dev/x-re proj -import lib/arm64-v8a/foo.so
+#           adb devices ; emulator -avd ford-x86_64-api35 -writable-system &
+#           frida -U -f com.x.y -l hook.js
+```
+
+`--x11` mounts `/tmp/.X11-unix` + your session xauth cookie and sets `DISPLAY`/
+`XAUTHORITY`. Java/Swing (Ghidra) renders through XWayland (`:0`). If a GUI fails with a
+cookie error, run on the host: `xhost +SI:localuser:$USER`.
+
+## Hardening
+
+This deliberately removes Claude's _own_ sandbox and permission prompts, so the box leans
+on Docker for confinement instead. Every run is hardened by default (defense-in-depth —
+it limits blast radius, it is not a guarantee):
+
+- **Build time:** minimal Debian slim, `--no-install-recommends` + cleaned apt lists, no
+  secrets baked in (the `claude` binary and all auth are bind-mounted), OCI provenance
+  labels, and **all setuid/setgid bits stripped** from the image.
+- **Run time:** `--security-opt no-new-privileges`, `--cap-drop ALL` plus only the five
+  caps the root entrypoint needs to create the mapped user and drop to it via gosu
+  (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`), a `--pids-limit`, a non-root
+  mapped user, and the default seccomp/AppArmor profiles (never disabled). The claude
+  process itself ends up with an **empty effective capability set**.
+
+Disable per run with `--no-harden`, globally with `harden = false` in config, and add your
+own Docker flags (e.g. `--memory`, `--cpus`, `--read-only`) via `docker_args = [...]`.
+
+Still: the containerized Claude can run any command and read/write every mounted path
+without asking, with unrestricted network. Keep writable mounts minimal (the config
+defaults to read-only for everything but the project) and don't mount secrets you don't
+want a fully-autonomous agent to touch.

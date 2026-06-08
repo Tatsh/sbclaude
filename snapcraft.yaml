@@ -1,0 +1,34 @@
+apps:
+  sbclaude:
+    command: 'bin/sbclaude'
+    plugs:
+      - 'home'
+      - 'network'
+      - 'network-bind'
+base: 'core24'
+confinement: 'strict'
+contact: 'https://github.com/Tatsh/sbclaude/issues'
+description: 'Run Claude Code in a throwaway Docker container with no sandbox and no permission prompts, against configurable host mounts, with an optional mobile reverse-engineering toolchain.'
+donation: 'https://buymeacoffee.com/Tatsh'
+grade: 'stable'
+issues: 'https://github.com/Tatsh/sbclaude/issues'
+license: 'MIT'
+name: 'sbclaude'
+parts:
+  sbclaude:
+    build-packages: []
+    plugin: 'python'
+    python-packages:
+      - '.'
+    source: '.'
+    stage-packages: []
+platforms:
+  amd64:
+    build-on: 'amd64'
+  arm64:
+    build-on: 'arm64'
+source-code: 'https://github.com/Tatsh/sbclaude'
+summary: 'Run Claude Code in a throwaway Docker container with no sandbox and no permission prompts, against configurable host mounts, with an optional mobile reverse-engineering toolchain.'
+title: 'sbclaude'
+version: '0.0.1'
+website: 'https://tatsh.github.io/sbclaude/'
