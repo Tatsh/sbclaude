@@ -135,8 +135,12 @@ def _patched_settings(settings: Path) -> Path:
     Path
         A temp file to bind-mount over the in-container settings.
     """
-    data = json.loads(settings.read_text(encoding='utf-8'))
-    data['sandbox'] = {'enabled': False, 'skipDangerousModePermissionPrompt': True}
+    data = json.loads(settings.read_text(encoding='utf-8')) | {
+        'sandbox': {
+            'enabled': False
+        },
+        'skipDangerousModePermissionPrompt': True
+    }
     fd, name = tempfile.mkstemp(prefix='sbclaude-settings.', suffix='.json')
     with os.fdopen(fd, 'w') as handle:
         json.dump(data, handle)

@@ -69,7 +69,8 @@ def test_build_run_argv_patches_settings(mocker: MockerFixture, tmp_path: Path) 
     _, cleanup = container.build_run_argv(container.RunSpec(project=project, name='n'))
     assert cleanup is not None
     data = json.loads(cleanup.read_text())
-    assert data['sandbox'] == {'enabled': False, 'skipDangerousModePermissionPrompt': True}
+    assert data['sandbox'] == {'enabled': False}
+    assert data['skipDangerousModePermissionPrompt']
     assert data['keep'] == 1
     cleanup.unlink()
 
