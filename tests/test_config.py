@@ -32,23 +32,23 @@ def test_load_config_values(tmp_path: Path) -> None:
 def test_expand_paths_glob(tmp_path: Path) -> None:
     (tmp_path / 'dev1').mkdir()
     (tmp_path / 'dev2').mkdir()
-    assert len(expand_paths([str(tmp_path / 'dev*')])) == 2
+    assert len(list(expand_paths([str(tmp_path / 'dev*')]))) == 2
 
 
 def test_expand_paths_plain(tmp_path: Path) -> None:
     target = tmp_path / 'd'
     target.mkdir()
-    assert expand_paths([str(target)]) == [target.resolve()]
+    assert list(expand_paths([str(target)])) == [target.resolve()]
 
 
 def test_expand_paths_missing(tmp_path: Path) -> None:
-    assert expand_paths([str(tmp_path / 'nope')]) == []
+    assert list(expand_paths([str(tmp_path / 'nope')])) == []
 
 
 def test_expand_paths_dedupes(tmp_path: Path) -> None:
     target = tmp_path / 'd'
     target.mkdir()
-    assert expand_paths([str(target), str(target)]) == [target.resolve()]
+    assert list(expand_paths([str(target), str(target)])) == [target.resolve()]
 
 
 def test_load_config_env(tmp_path: Path) -> None:

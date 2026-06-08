@@ -1,4 +1,5 @@
-"""Docker orchestration for sbclaude.
+"""
+Docker orchestration for sbclaude.
 
 Management (build, list, stop, inspect) uses the docker-py SDK. The interactive
 ``run`` and ``shell`` sessions hand off to the ``docker`` binary because docker-py's
@@ -31,10 +32,15 @@ __all__ = ('IMAGE_BASE', 'IMAGE_RE', 'LABEL', 'RunSpec', 'build_images', 'config
            'run', 'shell', 'stop')
 
 LABEL = 'sbclaude.managed'
+"""Docker label marking a container as sbclaude-managed."""
 PROJECT_LABEL = 'sbclaude.project'
+"""Docker label recording a container's project path."""
 HASH_LABEL = 'sbclaude.context_hash'
+"""Docker label storing the build context hash for staleness checks."""
 IMAGE_BASE = 'sbclaude:latest'
+"""Tag of the everyday coding image."""
 IMAGE_RE = 'sbclaude-re:latest'
+"""Tag of the reverse-engineering image."""
 HARDENING_ARGS = ('--security-opt', 'no-new-privileges', '--cap-drop', 'ALL', '--cap-add', 'CHOWN',
                   '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER', '--cap-add', 'SETUID',
                   '--cap-add', 'SETGID', '--pids-limit', '4096')
@@ -46,25 +52,40 @@ class RunSpec:
     """Fully-resolved description of a ``run`` invocation."""
 
     project: Path
-    """Project path."""
+    """Project path (read-write, becomes the working directory)."""
     name: str
+    """Container name."""
     network: str = 'host'
+    """Docker network mode."""
     image: str | None = None
+    """Image override, or ``None`` to auto-select."""
     use_re: bool = False
+    """Whether to use the reverse-engineering image and tools."""
     use_ghidra: bool = False
+    """Whether to mount the host Ghidra installation read-only."""
     use_android: bool = False
+    """Whether to mount the Android SDK and related devices."""
     use_usb: bool = False
+    """Whether to expose ``/dev/bus/usb`` for adb over USB."""
     use_x11: bool = False
+    """Whether to forward X11 ``DISPLAY`` and ``XAUTHORITY``."""
     ro: list[Path] = field(default_factory=list)
+    """Read-only mount paths."""
     rw: list[Path] = field(default_factory=list)
+    """Read-write mount paths."""
     env: dict[str, str] = field(default_factory=dict)
+    """Environment variables injected into the box."""
     harden: bool = True
+    """Whether to apply the container hardening flags."""
     extra_args: list[str] = field(default_factory=list)
+    """Extra arguments passed to ``docker run``."""
     claude_args: tuple[str, ...] = ()
+    """Arguments forwarded to ``claude``."""
 
 
 def default_name(project: Path) -> str:
-    """Derive a container name from a project directory.
+    """
+    Derive a container name from a project directory.
 
     Parameters
     ----------
@@ -80,7 +101,8 @@ def default_name(project: Path) -> str:
 
 
 def claude_binary() -> Path:
-    """Locate the real host ``claude`` binary, resolving any version symlink.
+    """
+    Locate the real host ``claude`` binary, resolving any version symlink.
 
     Returns
     -------
@@ -99,7 +121,8 @@ def claude_binary() -> Path:
 
 
 def _patched_settings(settings: Path) -> Path:
-    """Write a copy of ``settings.json`` with the bash sandbox disabled.
+    """
+    Write a copy of ``settings.json`` with the bash sandbox disabled.
 
     Parameters
     ----------
@@ -121,12 +144,13 @@ def _patched_settings(settings: Path) -> Path:
     return path
 
 
-def _v(src: Path | str, dst: Path | str | None = None, *, ro: bool = False) -> tuple[str]:
+def _v(src: Path | str, dst: Path | str | None = None, *, ro: bool = False) -> tuple[str, str]:
     return ('-v', f'{src}:{dst if dst is not None else src}{":ro" if ro else ""}')
 
 
 def config_dir(home: Path) -> Path:
-    """Return claude's config directory, honoring ``CLAUDE_CONFIG_DIR``.
+    """
+    Return claude's config directory, honouring ``CLAUDE_CONFIG_DIR``.
 
     Parameters
     ----------
@@ -143,7 +167,8 @@ def config_dir(home: Path) -> Path:
 
 
 def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
-    """Build the ``docker run`` argv for an interactive claude session.
+    """
+    Build the ``docker run`` argv for an interactive claude session.
 
     Parameters
     ----------
@@ -162,15 +187,13 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     tty = ('-i', '-t') if (sys.stdin.isatty() and sys.stdout.isatty()) else ('-i',)
     hardening = tuple(HARDENING_ARGS) if spec.harden else ()
     argv = [
-        'docker', 'run', '--rm', *tty, '--name', spec.name, *hardening,
-        '--label', f'{LABEL}=1', '--label', f'{PROJECT_LABEL}={spec.project}',
-        '--network', spec.network,
-        '-e', f'HOST_UID={uid}', '-e', f'HOST_GID={gid}',
-        '-e', f'HOST_USER={user}', '-e', f'HOST_HOME={home}',
-        '-e', f'TERM={os.environ.get("TERM", "xterm-256color")}',
-        *_v(claude_binary(), '/usr/local/bin/claude', ro=True),
-        *_v(cfg_dir),
-        *_v(spec.project), '-w', str(spec.project)
+        'docker', 'run', '--rm', *tty, '--name', spec.name, *hardening, '--label', f'{LABEL}=1',
+        '--label', f'{PROJECT_LABEL}={spec.project}', '--network', spec.network, '-e',
+        f'HOST_UID={uid}', '-e', f'HOST_GID={gid}', '-e', f'HOST_USER={user}', '-e',
+        f'HOST_HOME={home}', '-e', f'TERM={os.environ.get("TERM", "xterm-256color")}',
+        *_v(claude_binary(), '/usr/local/bin/claude', ro=True), *_v(cfg_dir), *_v(spec.project),
+        '-w',
+        str(spec.project)
     ]
     # Mirror CLAUDE_CONFIG_DIR into the box so claude reads the relocated config.
     if os.environ.get('CLAUDE_CONFIG_DIR'):
@@ -216,14 +239,13 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
 
 
 def _android_args(home: Path) -> Iterator[str]:
-    args: list[str] = []
     sdk = Path(os.environ.get('ANDROID_HOME', '/opt/android-sdk'))
     if sdk.is_dir():
-        yield _v(sdk, ro=True)
+        yield from _v(sdk, ro=True)
     if Path('/opt/android-sdk-update-manager').is_dir():
-        yield _v('/opt/android-sdk-update-manager', ro=True)
+        yield from _v('/opt/android-sdk-update-manager', ro=True)
     if (d := home / '.android').is_dir():
-        yield _v(home / '.android')
+        yield from _v(d)
     if (kvm := Path('/dev/kvm')).exists():
         yield from ('--device', '/dev/kvm', '--group-add', str(kvm.stat().st_gid))
 
@@ -247,7 +269,8 @@ def _x11_args(uid: int, user: str) -> list[str]:
 
 
 def run(spec: RunSpec) -> int:
-    """Launch an interactive claude session.
+    """
+    Launch an interactive claude session.
 
     Parameters
     ----------
@@ -271,7 +294,8 @@ def run(spec: RunSpec) -> int:
 
 
 def shell(name: str) -> int:
-    """Open a root debug shell inside a running box.
+    """
+    Open a root debug shell inside a running box.
 
     Parameters
     ----------
@@ -304,7 +328,8 @@ def _context_hash() -> str:
 
 
 def image_exists(tag: str) -> bool:
-    """Return whether a local image with ``tag`` exists.
+    """
+    Return whether a local image with ``tag`` exists.
 
     Parameters
     ----------
@@ -324,7 +349,8 @@ def image_exists(tag: str) -> bool:
 
 
 def image_up_to_date(tag: str) -> bool:
-    """Return whether the local image matches the current build context.
+    """
+    Return whether the local image matches the current build context.
 
     Parameters
     ----------
@@ -345,7 +371,8 @@ def image_up_to_date(tag: str) -> bool:
 
 
 def delete_images() -> list[str]:
-    """Delete the sbclaude images (RE first, then base).
+    """
+    Delete the sbclaude images (RE first, then base).
 
     Returns
     -------
@@ -364,7 +391,8 @@ def delete_images() -> list[str]:
 
 
 def ensure_image(image: str, *, log: Callable[[str], None] = lambda _line: None) -> None:
-    """Build ``image`` if it is missing or its build context changed.
+    """
+    Build ``image`` if it is missing or its build context changed.
 
     Parameters
     ----------
@@ -382,11 +410,12 @@ def ensure_image(image: str, *, log: Callable[[str], None] = lambda _line: None)
 
 
 def list_managed() -> Iterator[dict[str, str]]:
-    """Return info for every running sbclaude-managed container.
+    """
+    Return info for every running sbclaude-managed container.
 
-    Returns
-    -------
-    Iterator[dict[str, str]]
+    Yields
+    ------
+    dict[str, str]
         One mapping per container with ``name``, ``image``, ``status``, ``project``.
     """
     for ctr in _client().containers.list(filters={'label': f'{LABEL}=1'}):
@@ -401,31 +430,32 @@ def list_managed() -> Iterator[dict[str, str]]:
 
 
 def stop(name: str | None = None) -> Iterator[str]:
-    """Stop one named box, or all managed boxes when ``name`` is ``None``.
+    """
+    Stop one named box, or all managed boxes when ``name`` is ``None``.
 
     Parameters
     ----------
     name : str | None
         The container to stop, or ``None`` for every managed box.
 
-    Returns
-    -------
-    Iterator[str]
+    Yields
+    ------
+    str
         Names of the containers that were removed.
     """
     client = _client()
     if name is not None:
-        targets = (c for c in client.containers.list(all=True) if c.name == name)
+        targets = [c for c in client.containers.list(all=True) if c.name == name]
     else:
         targets = client.containers.list(all=True, filters={'label': f'{LABEL}=1'})
-    removed: list[str] = []
     for ctr in targets:
         ctr.remove(force=True)
         yield ctr.name or ''
 
 
 def build_images(*, with_re: bool = True, no_cache: bool = False) -> Iterator[str]:
-    """Build the sbclaude images, yielding log lines.
+    """
+    Build the sbclaude images, yielding log lines.
 
     Parameters
     ----------

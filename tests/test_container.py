@@ -61,15 +61,15 @@ def test_build_run_argv_re_image(mocker: MockerFixture, tmp_path: Path) -> None:
 def test_build_run_argv_patches_settings(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
-    cdir = tmp_path / '.claude'
-    cdir.mkdir()
-    (cdir / 'settings.json').write_text('{"sandbox": {"enabled": true}, "keep": 1}')
+    claude_dir = tmp_path / '.claude'
+    claude_dir.mkdir()
+    (claude_dir / 'settings.json').write_text('{"sandbox": {"enabled": true}, "keep": 1}')
     project = tmp_path / 'p'
     project.mkdir()
     _, cleanup = container.build_run_argv(container.RunSpec(project=project, name='n'))
     assert cleanup is not None
     data = json.loads(cleanup.read_text())
-    assert data['sandbox'] == {'enabled': False}
+    assert data['sandbox'] == {'enabled': False, 'skipDangerousModePermissionPrompt': True}
     assert data['keep'] == 1
     cleanup.unlink()
 
@@ -116,7 +116,7 @@ def test_list_managed(mocker: MockerFixture) -> None:
     client = mocker.MagicMock()
     client.containers.list.return_value = [ctr]
     mocker.patch('sbclaude.container.docker.from_env', return_value=client)
-    out = container.list_managed()
+    out = list(container.list_managed())
     assert out == [{
         'name': 'sbclaude-x',
         'image': 'sbclaude:latest',
@@ -131,7 +131,7 @@ def test_stop_named(mocker: MockerFixture) -> None:
     client = mocker.MagicMock()
     client.containers.list.return_value = [ctr]
     mocker.patch('sbclaude.container.docker.from_env', return_value=client)
-    assert container.stop('n') == ['n']
+    assert list(container.stop('n')) == ['n']
     ctr.remove.assert_called_once_with(force=True)
 
 
@@ -190,9 +190,9 @@ def test_run_cleans_up_patched_settings(mocker: MockerFixture, tmp_path: Path) -
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
-    cdir = tmp_path / '.claude'
-    cdir.mkdir()
-    (cdir / 'settings.json').write_text('{"sandbox": {"enabled": true}}')
+    claude_dir = tmp_path / '.claude'
+    claude_dir.mkdir()
+    (claude_dir / 'settings.json').write_text('{"sandbox": {"enabled": true}}')
     project = tmp_path / 'p'
     project.mkdir()
     completed = mocker.patch('sbclaude.container.sp.run')
@@ -286,7 +286,7 @@ def test_build_run_argv_env(mocker: MockerFixture, tmp_path: Path) -> None:
 def test_build_run_argv_config_dir_override(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
-    cfg = tmp_path / 'altconfig'
+    cfg = tmp_path / 'alternate'
     cfg.mkdir()
     mocker.patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': str(cfg)})
     project = tmp_path / 'p'

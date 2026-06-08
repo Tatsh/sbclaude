@@ -47,7 +47,7 @@ def test_run_env_flag(runner: CliRunner, mocker: MockerFixture) -> None:
 def test_run_env_bad(runner: CliRunner, mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())
-    assert runner.invoke(main, ['run', '-e', 'NOEQUALS']).exit_code != 0
+    assert runner.invoke(main, ['run', '-e', 'invalid']).exit_code != 0
 
 
 def test_run_pass_env(runner: CliRunner, mocker: MockerFixture) -> None:

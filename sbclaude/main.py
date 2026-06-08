@@ -90,8 +90,8 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
                              use_android=use_android,
                              use_usb=use_usb,
                              use_x11=use_x11,
-                             ro=expand_paths(cfg.ro) + expand_paths(list(ro_extra)),
-                             rw=expand_paths(cfg.rw) + expand_paths(list(rw_extra)),
+                             ro=[*expand_paths(cfg.ro), *expand_paths(ro_extra)],
+                             rw=[*expand_paths(cfg.rw), *expand_paths(rw_extra)],
                              env=env,
                              harden=cfg.harden and not no_harden,
                              extra_args=cfg.docker_args,
@@ -105,7 +105,7 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
 @main.command(name='ls')
 def ls() -> None:
     """List running sbclaude containers."""
-    boxes = container.list_managed()
+    boxes = list(container.list_managed())
     if not boxes:
         click.echo('No running sbclaude containers.')
         return
@@ -121,7 +121,7 @@ def ls() -> None:
 def stop(name: str | None, *, all_: bool) -> None:
     """Stop a running box (the current project's box by default)."""
     target = None if all_ else (name or container.default_name(Path.cwd()))
-    removed = container.stop(target)
+    removed = list(container.stop(target))
     click.echo(f'Stopped: {", ".join(removed)}' if removed else 'No matching box.')
 
 

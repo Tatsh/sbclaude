@@ -1,4 +1,5 @@
-"""Configuration loading for sbclaude.
+"""
+Configuration loading for sbclaude.
 
 The config file is TOML at :func:`config_path` (``~/.config/sbclaude/config.toml`` on
 Linux). All keys are optional.
@@ -16,14 +17,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from platformdirs import user_config_path
 import tomlkit
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 __all__ = ('Config', 'config_path', 'expand_paths', 'load_config')
 
 DEFAULT_NETWORK = 'host'
 """Default network for Docker."""
+
 
 def config_path() -> Path:
     """
@@ -42,14 +48,23 @@ class Config:
     """Resolved sbclaude configuration."""
 
     default_flags: list[str] = field(default_factory=list)
+    """Flags applied to every run."""
     ro: list[str] = field(default_factory=list)
+    """Read-only mount patterns (globs and ``~`` accepted)."""
     rw: list[str] = field(default_factory=list)
+    """Read-write mount patterns (globs and ``~`` accepted)."""
     env: dict[str, str] = field(default_factory=dict)
+    """Fixed environment variables injected into the box."""
     pass_env: list[str] = field(default_factory=list)
+    """Host environment variable names to forward into the box."""
     docker_args: list[str] = field(default_factory=list)
+    """Extra arguments passed to ``docker run``."""
     image: str | None = None
+    """Image override, or ``None`` to auto-select."""
     network: str = DEFAULT_NETWORK
+    """Docker network mode."""
     harden: bool = True
+    """Whether to apply the container hardening flags."""
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -90,12 +105,12 @@ def expand_paths(patterns: Sequence[str]) -> Iterator[Path]:
 
     Parameters
     ----------
-    patterns : list[str]
+    patterns : Sequence[str]
         Patterns such as ``~/dev*``.
 
-    Returns
-    -------
-    Iterator[Path]
+    Yields
+    ------
+    Path
         De-duplicated resolved paths that exist on disk, order preserved.
     """
     seen: dict[Path, None] = {}
@@ -109,4 +124,4 @@ def expand_paths(patterns: Sequence[str]) -> Iterator[Path]:
             resolved = match.resolve()
             if resolved.exists():
                 seen.setdefault(resolved, None)
-    yield from tuple(scene)
+    yield from seen
