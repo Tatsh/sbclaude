@@ -56,6 +56,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 # (and does not modify) the user's ~/.claude/settings.json.
 RUN mkdir -p /etc/claude-code
 COPY managed-settings.json /etc/claude-code/managed-settings.json
+# COPY keeps the build-context file's restrictive 0640 mode and assigns root
+# ownership, so the mapped non-root user cannot read it and Claude Code aborts
+# with EACCES while loading managed settings. Make it world-readable.
+RUN chmod 0644 /etc/claude-code/managed-settings.json
 
 # The binary is mounted read-only; never let it try to self-replace.
 ENV DISABLE_AUTOUPDATER=1
