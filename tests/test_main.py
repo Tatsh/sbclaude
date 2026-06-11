@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sbclaude.config import Config
@@ -105,9 +106,34 @@ def test_stop_all(runner: CliRunner, mocker: MockerFixture) -> None:
     stop.assert_called_once_with(None)
 
 
+def test_stop_default_project(runner: CliRunner, mocker: MockerFixture) -> None:
+    stop = mocker.patch('sbclaude.main.container.stop', return_value=['sbclaude-p-abc123'])
+    assert 'Stopped: sbclaude-p-abc123' in runner.invoke(main, ['stop']).output
+    stop.assert_called_once_with(project=Path.cwd().resolve())
+
+
 def test_shell(runner: CliRunner, mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.main.container.shell', return_value=0)
     assert runner.invoke(main, ['shell', '-n', 'n']).exit_code == 0
+
+
+def test_shell_default_single(runner: CliRunner, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.main.container.project_containers', return_value=['sbclaude-p-abc123'])
+    shell = mocker.patch('sbclaude.main.container.shell', return_value=0)
+    assert runner.invoke(main, ['shell']).exit_code == 0
+    shell.assert_called_once_with('sbclaude-p-abc123')
+
+
+def test_shell_default_none(runner: CliRunner, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.main.container.project_containers', return_value=[])
+    assert runner.invoke(main, ['shell']).exit_code != 0
+
+
+def test_shell_default_multiple(runner: CliRunner, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.main.container.project_containers', return_value=['a', 'b'])
+    result = runner.invoke(main, ['shell'])
+    assert result.exit_code != 0
+    assert 'pass -n' in result.output
 
 
 def test_build(runner: CliRunner, mocker: MockerFixture) -> None:

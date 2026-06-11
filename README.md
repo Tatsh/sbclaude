@@ -77,12 +77,18 @@ sbclaude run -r /data -w ~/scratch   # extra read-only / read-write mounts
 sbclaude run --re --x11           # RE image + Ghidra/Android tools + GUI passthrough
 sbclaude run -- --version         # everything after -- goes to claude
 sbclaude ls                       # list running sbclaude containers
-sbclaude stop [--all]             # stop the current project's box (or all)
-sbclaude shell                    # root debug shell inside the running box
+sbclaude stop [--all]             # stop this project's boxes (or all with --all)
+sbclaude shell                    # root debug shell in this project's box
 sbclaude build [--no-re] [--no-cache]   # (re)build the images
 sbclaude delete-image             # remove the sbclaude images
 sbclaude config                   # show the config file path
 ```
+
+You can run **several boxes against the same project directory at once**. Each `run` gets a
+unique container name — the project name plus a short random suffix — so there is no name
+collision; override it with `-n`. `sbclaude ls` lists them all, `sbclaude stop` stops every box
+for the current project, and `sbclaude shell` attaches to it (or asks you to pass `-n NAME` when
+more than one is running).
 
 ### `run` flags
 

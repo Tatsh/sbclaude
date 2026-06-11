@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess as sp
 import sys
 import tempfile
@@ -29,8 +30,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
 __all__ = ('IMAGE_BASE', 'IMAGE_RE', 'LABEL', 'RunSpec', 'build_images', 'config_dir',
-           'delete_images', 'ensure_image', 'image_exists', 'image_up_to_date', 'list_managed',
-           'run', 'shell', 'stop')
+           'default_name', 'delete_images', 'ensure_image', 'image_exists', 'image_up_to_date',
+           'list_managed', 'project_containers', 'run', 'shell', 'stop', 'unique_name')
 
 LABEL = 'sbclaude.managed'
 """Docker label marking a container as sbclaude-managed."""
@@ -99,6 +100,26 @@ def default_name(project: Path) -> str:
         A docker-safe container name.
     """
     return f'sbclaude-{re.sub(r"[^a-zA-Z0-9_.-]", "-", project.name)}'
+
+
+def unique_name(project: Path) -> str:
+    """
+    Derive a unique container name for a project.
+
+    A short random suffix lets several boxes run against the same project
+    directory at once without colliding on the Docker container name.
+
+    Parameters
+    ----------
+    project : Path
+        The project directory.
+
+    Returns
+    -------
+    str
+        A docker-safe container name unique to this invocation.
+    """
+    return f'{default_name(project)}-{secrets.token_hex(3)}'
 
 
 def claude_binary() -> Path:
@@ -434,14 +455,41 @@ def list_managed() -> Iterator[dict[str, str]]:
         }
 
 
-def stop(name: str | None = None) -> Iterator[str]:
+def project_containers(project: Path) -> list[str]:
     """
-    Stop one named box, or all managed boxes when ``name`` is ``None``.
+    Return the names of running managed boxes for a project.
+
+    Parameters
+    ----------
+    project : Path
+        The project directory the boxes were started against.
+
+    Returns
+    -------
+    list[str]
+        Names of the running boxes whose project label matches.
+    """
+    return [
+        ctr.name or '' for ctr in _client().containers.list(
+            filters={'label': [f'{LABEL}=1', f'{PROJECT_LABEL}={project}']})
+    ]
+
+
+def stop(name: str | None = None, project: Path | None = None) -> Iterator[str]:
+    """
+    Stop boxes by name, by project, or every managed box.
+
+    When ``name`` is given only that box is stopped. Otherwise, when
+    ``project`` is given every managed box for that project is stopped (this
+    is what removes several boxes sharing one project directory). When both
+    are ``None`` every managed box is stopped.
 
     Parameters
     ----------
     name : str | None
-        The container to stop, or ``None`` for every managed box.
+        The single container to stop.
+    project : Path | None
+        Stop every managed box started against this project directory.
 
     Yields
     ------
@@ -451,6 +499,9 @@ def stop(name: str | None = None) -> Iterator[str]:
     client = _client()
     if name is not None:
         targets = [c for c in client.containers.list(all=True) if c.name == name]
+    elif project is not None:
+        targets = client.containers.list(
+            all=True, filters={'label': [f'{LABEL}=1', f'{PROJECT_LABEL}={project}']})
     else:
         targets = client.containers.list(all=True, filters={'label': f'{LABEL}=1'})
     for ctr in targets:

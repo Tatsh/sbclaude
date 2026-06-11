@@ -82,7 +82,7 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
             raise click.BadParameter(msg)
         env[key] = value
     spec = container.RunSpec(project=proj,
-                             name=name or container.default_name(proj),
+                             name=name or container.unique_name(proj),
                              network=network or cfg.network,
                              image=image or cfg.image,
                              use_re=use_re,
@@ -116,20 +116,34 @@ def ls() -> None:
 
 
 @main.command()
-@click.option('-n', '--name', help='Container name (default: sbclaude-<cwd>).')
+@click.option('-n', '--name', help='Container name. Default: every box for the current project.')
 @click.option('--all', 'all_', is_flag=True, help='Stop every sbclaude container.')
 def stop(name: str | None, *, all_: bool) -> None:
-    """Stop a running box (the current project's box by default)."""
-    target = None if all_ else (name or container.default_name(Path.cwd()))
-    removed = list(container.stop(target))
+    """Stop running boxes (every box for the current project by default)."""
+    if all_:
+        removed = list(container.stop(None))
+    elif name:
+        removed = list(container.stop(name))
+    else:
+        removed = list(container.stop(project=Path.cwd().resolve()))
     click.echo(f'Stopped: {", ".join(removed)}' if removed else 'No matching box.')
 
 
 @main.command()
-@click.option('-n', '--name', help='Container name (default: sbclaude-<cwd>).')
+@click.option('-n', '--name', help="Container name. Default: the current project's box.")
 def shell(name: str | None) -> None:
     """Open a root debug shell inside a running box."""  # noqa: DOC501
-    raise SystemExit(container.shell(name or container.default_name(Path.cwd())))
+    target = name
+    if target is None:
+        names = container.project_containers(Path.cwd().resolve())
+        if not names:
+            msg = 'No running box for this project.'
+            raise click.ClickException(msg)
+        if len(names) > 1:
+            msg = f'Multiple boxes for this project; pass -n NAME: {", ".join(names)}'
+            raise click.ClickException(msg)
+        target = names[0]
+    raise SystemExit(container.shell(target))
 
 
 @main.command()

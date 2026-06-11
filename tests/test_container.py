@@ -20,6 +20,12 @@ def test_default_name() -> None:
     assert container.default_name(Path('/a/b/My Proj')) == 'sbclaude-My-Proj'
 
 
+def test_unique_name() -> None:
+    name = container.unique_name(Path('/a/b/My Proj'))
+    assert name.startswith('sbclaude-My-Proj-')
+    assert name != container.unique_name(Path('/a/b/My Proj'))
+
+
 def test_claude_binary_missing(mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.container.which', return_value=None)
     with pytest.raises(FileNotFoundError):
@@ -134,6 +140,28 @@ def test_stop_named(mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.container.docker.from_env', return_value=client)
     assert list(container.stop('n')) == ['n']
     ctr.remove.assert_called_once_with(force=True)
+
+
+def test_stop_by_project(mocker: MockerFixture) -> None:
+    ctr = mocker.MagicMock()
+    ctr.name = 'sbclaude-p-abc123'
+    client = mocker.MagicMock()
+    client.containers.list.return_value = [ctr]
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    assert list(container.stop(project=Path('/p'))) == ['sbclaude-p-abc123']
+    ctr.remove.assert_called_once_with(force=True)
+    assert client.containers.list.call_args.kwargs['filters'] == {
+        'label': ['sbclaude.managed=1', 'sbclaude.project=/p']
+    }
+
+
+def test_project_containers(mocker: MockerFixture) -> None:
+    ctr = mocker.MagicMock()
+    ctr.name = 'sbclaude-p-abc123'
+    client = mocker.MagicMock()
+    client.containers.list.return_value = [ctr]
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    assert container.project_containers(Path('/p')) == ['sbclaude-p-abc123']
 
 
 def test_build_images(mocker: MockerFixture) -> None:
