@@ -100,6 +100,8 @@ more than one is running).
 | `--usb`          | expose `/dev/bus/usb` for adb over USB                                         |
 | `--ios`          | mount the host `usbmuxd` socket so frida reaches an iOS device over USB        |
 | `--x11`          | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator) |
+| `--ssh`          | mount the host `~/.ssh` read-only for SSH git remotes                          |
+| `--gpg`          | mount the host GnuPG home + agent socket for signing commits                   |
 | `--net bridge`   | isolate the box's network (default is `host` — `localhost` = your host)        |
 | `-r/-w/-p/-n/-i` | extra ro/rw mount, project, container name, image override                     |
 
@@ -158,6 +160,25 @@ which doesn't exist in the box → `ENOENT`. The image ships **Python 3 in a vir
 A server that talks to a process on the host (e.g. a Ghidra GUI on `localhost`) works out
 of the box because the box defaults to host networking; pass `--net bridge` only if you
 want to isolate it.
+
+## Git over SSH and commit signing
+
+Pushing over SSH and signing commits need the host's private keys, which are **not** mounted
+by default (the box is a fully-autonomous, no-prompt agent — see [Hardening](#hardening)).
+Opt in per run, or globally with `default_flags = ["--ssh", "--gpg"]`:
+
+- `--ssh` bind-mounts `~/.ssh` **read-only**, so SSH remotes authenticate with the host's
+  keys and `known_hosts`. Read-only means newly-learnt host keys are not written back.
+- `--gpg` bind-mounts the host **GnuPG home** (read-write — `gpg` needs to write lock files
+  and the trustdb) and overlays the host's live **gpg-agent socket** at `~/.gnupg/S.gpg-agent`.
+  The host agent performs the signing and owns the secret keys, so a cached passphrase carries
+  over and any pinentry prompt appears on the host. The image ships `gnupg` and
+  `openssh-client`; your mounted `~/.gitconfig` (with `user.signingkey`/`commit.gpgsign`) does
+  the rest.
+
+```sh
+sbclaude run --ssh --gpg -p ~/dev/foo   # inside: git push, git commit -S both work
+```
 
 ## RE toolchain (`--re`)
 
@@ -218,4 +239,5 @@ own Docker flags (e.g. `--memory`, `--cpus`, `--read-only`) via `docker_args = [
 Still: the containerized Claude can run any command and read/write every mounted path
 without asking, with unrestricted network. Keep writable mounts minimal (the config
 defaults to read-only for everything but the project) and don't mount secrets you don't
-want a fully-autonomous agent to touch.
+want a fully-autonomous agent to touch. This is why `--ssh` and `--gpg` are opt-in: they
+expose your private SSH and GPG key material (the GnuPG home read-write) to that agent.

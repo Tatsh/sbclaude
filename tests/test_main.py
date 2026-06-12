@@ -52,6 +52,24 @@ def test_run_ios_config_default_flag(runner: CliRunner, mocker: MockerFixture) -
     assert run.call_args[0][0].use_ios
 
 
+def test_run_ssh_gpg_flags(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--ssh', '--gpg'])
+    spec = run.call_args[0][0]
+    assert spec.use_ssh
+    assert spec.use_gpg
+
+
+def test_run_ssh_gpg_config_default_flags(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(default_flags=['--ssh', '--gpg']))
+    runner.invoke(main, ['run'])
+    spec = run.call_args[0][0]
+    assert spec.use_ssh
+    assert spec.use_gpg
+
+
 def test_run_debian_mirror_flag(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())

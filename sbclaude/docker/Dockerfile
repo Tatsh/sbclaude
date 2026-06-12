@@ -29,6 +29,8 @@ ARG DEBIAN_MIRROR=""
 # lives here, not just in Dockerfile.re, so the RE image inherits it for its jar
 # downloads.
 #   git      - core to most workflows / commit tooling
+#   gnupg    - signing commits with the host's GPG keys (see --gpg)
+#   openssh  - SSH git remotes using the host's keys (see --ssh)
 #   ripgrep  - file search
 #   gosu     - clean privilege drop to the host-mapped UID
 #   tini     - PID 1 reaping (claude spawns many child processes)
@@ -58,6 +60,8 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         git \
+        gnupg \
+        openssh-client \
         ripgrep \
         less \
         gosu \

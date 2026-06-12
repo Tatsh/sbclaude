@@ -246,6 +246,75 @@ def test_build_run_argv_ios_no_socket(mocker: MockerFixture, tmp_path: Path) -> 
     assert not any('usbmuxd' in arg or 'absent' in arg for arg in argv)
 
 
+def test_build_run_argv_ssh(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    ssh = tmp_path / '.ssh'
+    ssh.mkdir()
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_ssh=True))
+    assert f'{ssh}:{ssh}:ro' in argv
+
+
+def test_build_run_argv_gpg(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'GNUPGHOME': ''})
+    gnupg = tmp_path / '.gnupg'
+    gnupg.mkdir()
+    sock = tmp_path / 'run' / 'S.gpg-agent'
+    mocker.patch('sbclaude.container.sp.run', return_value=mocker.MagicMock(stdout=f'{sock}\n'))
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpg=True))
+    assert f'{gnupg}:{gnupg}' in argv
+    assert f'{sock}:{gnupg / "S.gpg-agent"}' in argv
+
+
+def test_build_run_argv_gpg_socket_in_home(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'GNUPGHOME': ''})
+    gnupg = tmp_path / '.gnupg'
+    gnupg.mkdir()
+    sock = gnupg / 'S.gpg-agent'
+    mocker.patch('sbclaude.container.sp.run', return_value=mocker.MagicMock(stdout=f'{sock}\n'))
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpg=True))
+    # The socket already lives in the mounted home, so no separate overlay is added.
+    assert argv.count(f'{sock}:{sock}') == 0
+
+
+def test_build_run_argv_gpg_custom_home(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    custom = tmp_path / 'gnupg-home'
+    custom.mkdir()
+    mocker.patch.dict(os.environ, {'GNUPGHOME': str(custom)})
+    mocker.patch('sbclaude.container.sp.run', side_effect=FileNotFoundError)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpg=True))
+    assert f'{custom}:{custom}' in argv
+    assert f'GNUPGHOME={custom}' in argv
+    # gpgconf is absent, so no agent socket overlay is mounted.
+    assert not any('S.gpg-agent' in arg for arg in argv)
+
+
+def test_build_run_argv_gpg_no_home(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'GNUPGHOME': ''})
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpg=True))
+    assert not any('.gnupg' in arg or 'S.gpg-agent' in arg for arg in argv)
+
+
 def test_build_run_argv_x11_with_cookie(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)

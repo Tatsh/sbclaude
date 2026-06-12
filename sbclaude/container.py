@@ -77,6 +77,10 @@ class RunSpec:
     """Whether to mount the host usbmuxd socket so frida can reach an iOS device."""
     use_x11: bool = False
     """Whether to forward X11 ``DISPLAY`` and ``XAUTHORITY``."""
+    use_ssh: bool = False
+    """Whether to mount the host ``~/.ssh`` directory read-only for SSH git remotes."""
+    use_gpg: bool = False
+    """Whether to mount the host GnuPG home and agent socket for commit signing."""
     ro: list[Path] = field(default_factory=list)
     """Read-only mount paths."""
     rw: list[Path] = field(default_factory=list)
@@ -266,6 +270,10 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         argv += _v('/dev/bus/usb')
     if spec.use_ios:
         argv += _ios_args()
+    if spec.use_ssh:
+        argv += _ssh_args(home)
+    if spec.use_gpg:
+        argv += _gpg_args(home)
     if spec.use_x11:
         argv += _x11_args(uid, user)
     argv += spec.extra_args
@@ -300,6 +308,45 @@ def _ios_args() -> list[str]:
             'the host?\n')
     if LOCKDOWN_DIR.is_dir():
         args += _v(LOCKDOWN_DIR, ro=True)
+    return args
+
+
+def _ssh_args(home: Path) -> list[str]:
+    # Mount the host ~/.ssh read-only so SSH git remotes authenticate with the host's
+    # keys and known_hosts. Read-only protects the keys from the autonomous agent (at
+    # the cost of not persisting newly-learnt host keys).
+    ssh = home / '.ssh'
+    return list(_v(ssh, ro=True)) if ssh.is_dir() else []
+
+
+def _gpg_agent_socket() -> Path | None:
+    try:
+        out = sp.run(
+            ['gpgconf', '--list-dirs', 'agent-socket'],  # noqa: S607
+            check=True,
+            capture_output=True,
+            text=True).stdout.strip()
+    except (FileNotFoundError, sp.CalledProcessError):
+        return None
+    return Path(out) if out else None
+
+
+def _gpg_args(home: Path) -> list[str]:
+    # Mount the host GnuPG home (read-write: gpg needs to write lock files and the
+    # trustdb) so the container's gpg sees the same keyrings, then bridge to the host's
+    # running gpg-agent for the actual signing. The agent socket often lives outside the
+    # home (e.g. /run/user/<uid>/gnupg); the container's gpg, lacking a usable
+    # /run/user/<uid>, looks for it at <GNUPGHOME>/S.gpg-agent, so overlay the live host
+    # socket there.
+    homedir = Path(os.environ.get('GNUPGHOME') or home / '.gnupg')
+    if not homedir.is_dir():
+        return []
+    args = list(_v(homedir))
+    if os.environ.get('GNUPGHOME'):
+        args += ['-e', f'GNUPGHOME={homedir}']
+    if (socket := _gpg_agent_socket()) and socket.is_socket() \
+            and not socket.is_relative_to(homedir):
+        args += _v(socket, homedir / 'S.gpg-agent')
     return args
 
 

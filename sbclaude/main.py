@@ -51,6 +51,14 @@ def main(ctx: click.Context) -> None:
               is_flag=True,
               help='Mount the host usbmuxd socket so frida can reach an iOS device.')
 @click.option('--x11', 'use_x11', is_flag=True, help='Forward DISPLAY + XAUTHORITY for GUIs.')
+@click.option('--ssh',
+              'use_ssh',
+              is_flag=True,
+              help='Mount the host ~/.ssh read-only for SSH git remotes.')
+@click.option('--gpg',
+              'use_gpg',
+              is_flag=True,
+              help='Mount the host GnuPG home and agent socket for signing commits.')
 @click.option('--net',
               'network',
               help='Docker network mode (default: host; use "bridge" to isolate).')
@@ -65,13 +73,11 @@ def main(ctx: click.Context) -> None:
               help='Disable the container hardening flags (cap-drop, no-new-privileges, ...).')
 @click.option('-d', '--debug', is_flag=True, help='Enable debug level logging.')
 @click.argument('claude_args', nargs=-1, type=click.UNPROCESSED)
-def run(project: Path | None, rw_extra: tuple[str,
-                                              ...], ro_extra: tuple[str,
-                                                                    ...], env_extra: tuple[str,
-                                                                                           ...],
-        name: str | None, image: str | None, network: str | None, debian_mirror: str | None,
-        claude_args: tuple[str, ...], *, use_re: bool, use_ghidra: bool, use_android: bool,
-        use_usb: bool, use_ios: bool, use_x11: bool, no_harden: bool, debug: bool) -> None:
+def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ...],
+        env_extra: tuple[str, ...], name: str | None, image: str | None, network: str | None,
+        debian_mirror: str | None, claude_args: tuple[str, ...], *, use_re: bool, use_ghidra: bool,
+        use_android: bool, use_usb: bool, use_ios: bool, use_x11: bool, use_ssh: bool,
+        use_gpg: bool, no_harden: bool, debug: bool) -> None:
     """Launch claude in a fresh container. Args after ``--`` pass through to claude."""  # noqa: DOC501
     setup_logging(debug=debug, loggers={'sbclaude': {}})
     cfg = load_config()
@@ -82,6 +88,8 @@ def run(project: Path | None, rw_extra: tuple[str,
     use_usb = use_usb or '--usb' in flags
     use_ios = use_ios or '--ios' in flags
     use_x11 = use_x11 or '--x11' in flags
+    use_ssh = use_ssh or '--ssh' in flags
+    use_gpg = use_gpg or '--gpg' in flags
     debian_mirror = debian_mirror or cfg.debian_mirror
     proj = (project or Path.cwd()).resolve()
     # Env precedence: config [env] table, then host values for pass_env names, then -e flags.
@@ -103,6 +111,8 @@ def run(project: Path | None, rw_extra: tuple[str,
                              use_usb=use_usb,
                              use_ios=use_ios,
                              use_x11=use_x11,
+                             use_ssh=use_ssh,
+                             use_gpg=use_gpg,
                              ro=[*expand_paths(cfg.ro), *expand_paths(ro_extra)],
                              rw=[*expand_paths(cfg.rw), *expand_paths(rw_extra)],
                              env=env,
