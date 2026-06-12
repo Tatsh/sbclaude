@@ -12,25 +12,22 @@ FROM sbclaude:latest
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# --- Temurin (Adoptium) JDK 21 — required by Ghidra 12.x; fine for jadx/apktool/baksmali ---
-RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg && \
-    mkdir -p /etc/apt/keyrings && \
-    wget -qO- https://packages.adoptium.net/artifactory/api/gpg/key/public \
-        | gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb bookworm main" \
-        > /etc/apt/sources.list.d/adoptium.list && \
-    apt-get update && apt-get install -y --no-install-recommends temurin-21-jdk && \
-    rm -rf /var/lib/apt/lists/*
-
-ENV JAVA_HOME=/usr/lib/jvm/temurin-21-jdk-amd64
-
-# --- Build toolchain + binutils + analysis utilities + Python + GUI/emulator runtime libs ---
-# The X11/GL/audio libs are the dynamic deps the MOUNTED Ghidra GUI, jadx-gui and
-# Android emulator need; usbutils is for `adb` over USB.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# --- Temurin (Adoptium) JDK 21 (Ghidra 12.x needs it; fine for jadx/apktool/baksmali),
+#     the build toolchain, binutils, analysis utilities, and the X11/GL/audio libs the
+#     MOUNTED Ghidra GUI, jadx-gui and Android emulator dynamically link against.
+#     usbutils is for `adb` over USB. One apt layer: register the Adoptium repo
+#     (armoured .asc key via curl inherited from the base — no gnupg/dearmor), then a
+#     single update + install. python3*, curl, and wget already come from the base
+#     image (wget pulls the dex2jar/baksmali jars below). ---
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
+        -o /etc/apt/keyrings/adoptium.asc \
+    && echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb bookworm main" \
+        > /etc/apt/sources.list.d/adoptium.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        temurin-21-jdk \
         build-essential gcc g++ make pkg-config cmake \
         binutils file xxd bsdmainutils \
-        python3 python3-pip python3-venv \
         openssl unzip zip xz-utils p7zip-full \
         usbutils \
         x11-utils x11-xserver-utils xauth \
@@ -41,11 +38,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libfontconfig1 libfreetype6 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Python RE tooling (PEP-668 isolated venv). Frida pinned to the host version
-#     so a host-built frida-server matches the client (see dynamic-analysis-recipes.md). ---
-RUN python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir -U pip && \
-    /opt/venv/bin/pip install --no-cache-dir \
+ENV JAVA_HOME=/usr/lib/jvm/temurin-21-jdk-amd64
+
+# --- Python RE tooling. The base image already provides /opt/venv (with the MCP SDK)
+#     on PATH, so add the RE tools to that same venv rather than recreating it. Frida
+#     is pinned to the host version so a host-built frida-server matches the client
+#     (see dynamic-analysis-recipes.md). ---
+RUN /opt/venv/bin/pip install --no-cache-dir \
         "frida==17.9.11" frida-tools mitmproxy
 
 # --- dex2jar (absent on host) ---
