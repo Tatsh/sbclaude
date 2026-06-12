@@ -64,7 +64,10 @@ getuid
 ghidra
 ghidra's
 globaltoc
+gnupghome
 gosu
+gpgconf
+gpgsign
 hoverxref
 htmlcov
 idevice
@@ -124,6 +127,7 @@ oneline
 passthrough
 pathlib
 pavelzw
+pinentry
 pipx
 platformdirs
 plistlib
@@ -153,6 +157,7 @@ setgid
 setuid
 shellcheck
 shellformat
+signingkey
 signtool
 smali
 snapcore
@@ -169,6 +174,7 @@ tomllib
 tomlq
 tonumber
 tostring
+trustdb
 tryfirst
 ubyte
 udvare
