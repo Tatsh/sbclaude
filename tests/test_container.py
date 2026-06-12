@@ -174,6 +174,36 @@ def test_build_images(mocker: MockerFixture) -> None:
     assert 'boom' in lines
 
 
+def test_build_images_debian_mirror_base_only(mocker: MockerFixture) -> None:
+    client = mocker.MagicMock()
+    client.api.build.return_value = [{'stream': 'ok\n'}]
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    list(container.build_images(debian_mirror='http://ftp.us.debian.org/debian/'))
+    by_dockerfile = {
+        c.kwargs['dockerfile']: c.kwargs['buildargs']
+        for c in client.api.build.call_args_list
+    }
+    # Trailing slash stripped, and only the base build receives the mirror argument.
+    assert by_dockerfile['Dockerfile'] == {'DEBIAN_MIRROR': 'http://ftp.us.debian.org/debian'}
+    assert by_dockerfile['Dockerfile.re'] is None
+
+
+def test_build_images_no_mirror_passes_none(mocker: MockerFixture) -> None:
+    client = mocker.MagicMock()
+    client.api.build.return_value = [{'stream': 'ok\n'}]
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    list(container.build_images(with_re=False))
+    assert client.api.build.call_args.kwargs['buildargs'] is None
+
+
+def test_ensure_image_passes_debian_mirror(mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.image_up_to_date', return_value=False)
+    mocker.patch('sbclaude.container.image_exists', return_value=False)
+    build = mocker.patch('sbclaude.container.build_images', return_value=iter(['built']))
+    container.ensure_image(container.IMAGE_BASE, debian_mirror='http://m/debian')
+    build.assert_called_once_with(with_re=False, debian_mirror='http://m/debian')
+
+
 def test_build_run_argv_android(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
@@ -187,6 +217,33 @@ def test_build_run_argv_android(mocker: MockerFixture, tmp_path: Path) -> None:
         container.RunSpec(project=project, name='n', use_android=True))
     assert f'{sdk}:{sdk}:ro' in argv
     assert f'{tmp_path / ".android"}:{tmp_path / ".android"}' in argv
+
+
+def test_build_run_argv_ios(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    sock_path = tmp_path / 'usbmuxd'
+    lockdown = tmp_path / 'lockdown'
+    lockdown.mkdir()
+    mocker.patch('sbclaude.container.USBMUXD_SOCKET', sock_path)
+    mocker.patch('sbclaude.container.LOCKDOWN_DIR', lockdown)
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_ios=True))
+    assert f'{sock_path}:{sock_path}' in argv
+    assert f'{lockdown}:{lockdown}:ro' in argv
+
+
+def test_build_run_argv_ios_no_socket(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.USBMUXD_SOCKET', tmp_path / 'absent')
+    mocker.patch('sbclaude.container.LOCKDOWN_DIR', tmp_path / 'absent-lockdown')
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_ios=True))
+    assert not any('usbmuxd' in arg or 'absent' in arg for arg in argv)
 
 
 def test_build_run_argv_x11_with_cookie(mocker: MockerFixture, tmp_path: Path) -> None:
@@ -238,7 +295,7 @@ def test_ensure_image_builds_when_missing(mocker: MockerFixture) -> None:
     build = mocker.patch('sbclaude.container.build_images', return_value=iter(['built']))
     logged: list[str] = []
     container.ensure_image(container.IMAGE_BASE, log=logged.append)
-    build.assert_called_once_with(with_re=False)
+    build.assert_called_once_with(with_re=False, debian_mirror=None)
     assert 'built' in logged
 
 
@@ -248,7 +305,7 @@ def test_ensure_image_rebuilds_when_stale(mocker: MockerFixture) -> None:
     build = mocker.patch('sbclaude.container.build_images', return_value=iter(['built']))
     logged: list[str] = []
     container.ensure_image(container.IMAGE_RE, log=logged.append)
-    build.assert_called_once_with(with_re=True)
+    build.assert_called_once_with(with_re=True, debian_mirror=None)
     assert any('rebuilding' in line for line in logged)
 
 

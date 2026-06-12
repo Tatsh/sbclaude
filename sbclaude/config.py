@@ -63,6 +63,8 @@ class Config:
     """Image override, or ``None`` to auto-select."""
     network: str = DEFAULT_NETWORK
     """Docker network mode."""
+    debian_mirror: str | None = None
+    """Debian archive mirror used when building the images, or ``None`` for the default."""
     harden: bool = True
     """Whether to apply the container hardening flags."""
 
@@ -96,6 +98,7 @@ def load_config(path: Path | None = None) -> Config:
                   docker_args=[str(x) for x in data.get('docker_args', [])],
                   image=(str(data['image']) if data.get('image') else None),
                   network=str(data.get('network', DEFAULT_NETWORK)),
+                  debian_mirror=(str(data['debian_mirror']) if data.get('debian_mirror') else None),
                   harden=bool(data.get('harden', True)))
 
 

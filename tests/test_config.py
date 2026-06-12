@@ -29,6 +29,12 @@ def test_load_config_values(tmp_path: Path) -> None:
     assert cfg.image == 'sbclaude-re:latest'
 
 
+def test_load_config_debian_mirror(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('debian_mirror = "http://ftp.us.debian.org/debian"\n')
+    assert load_config(path).debian_mirror == 'http://ftp.us.debian.org/debian'
+
+
 def test_expand_paths_glob(tmp_path: Path) -> None:
     (tmp_path / 'dev1').mkdir()
     (tmp_path / 'dev2').mkdir()

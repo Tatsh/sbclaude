@@ -47,6 +47,10 @@ HARDENING_ARGS = ('--security-opt', 'no-new-privileges', '--cap-drop', 'ALL', '-
                   '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER', '--cap-add', 'SETUID',
                   '--cap-add', 'SETGID', '--pids-limit', '4096')
 """Hardening arguments to Docker."""
+USBMUXD_SOCKET = Path('/var/run/usbmuxd')
+"""Host usbmuxd socket that frida's usbmux backend uses to reach an iOS device."""
+LOCKDOWN_DIR = Path('/var/lib/lockdown')
+"""Host lockdownd pairing-records directory, mounted read-only so iOS pairing carries in."""
 
 
 @dataclass
@@ -69,6 +73,8 @@ class RunSpec:
     """Whether to mount the Android SDK and related devices."""
     use_usb: bool = False
     """Whether to expose ``/dev/bus/usb`` for adb over USB."""
+    use_ios: bool = False
+    """Whether to mount the host usbmuxd socket so frida can reach an iOS device."""
     use_x11: bool = False
     """Whether to forward X11 ``DISPLAY`` and ``XAUTHORITY``."""
     ro: list[Path] = field(default_factory=list)
@@ -79,6 +85,8 @@ class RunSpec:
     """Environment variables injected into the box."""
     harden: bool = True
     """Whether to apply the container hardening flags."""
+    debian_mirror: str | None = None
+    """Debian archive mirror for an auto-triggered image build, or ``None`` for the default."""
     extra_args: list[str] = field(default_factory=list)
     """Extra arguments passed to ``docker run``."""
     claude_args: tuple[str, ...] = ()
@@ -256,6 +264,8 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         argv += _android_args(home)
     if spec.use_usb and Path('/dev/bus/usb').is_dir():
         argv += _v('/dev/bus/usb')
+    if spec.use_ios:
+        argv += _ios_args()
     if spec.use_x11:
         argv += _x11_args(uid, user)
     argv += spec.extra_args
@@ -274,6 +284,23 @@ def _android_args(home: Path) -> Iterator[str]:
         yield from _v(d)
     if (kvm := Path('/dev/kvm')).exists():
         yield from ('--device', '/dev/kvm', '--group-add', str(kvm.stat().st_gid))
+
+
+def _ios_args() -> list[str]:
+    # frida's usbmux ("fruity") backend reaches an iOS device through the host usbmuxd
+    # socket rather than claiming the USB device directly (the host usbmuxd already owns
+    # it), so bind-mount that socket read-write. The lockdown directory carries the
+    # host's existing pairing records so a trusted session needs no re-pairing.
+    args: list[str] = []
+    if USBMUXD_SOCKET.is_socket():
+        args += _v(USBMUXD_SOCKET)
+    else:
+        sys.stderr.write(
+            f'sbclaude: --ios: no usbmuxd socket at {USBMUXD_SOCKET}; is usbmuxd running on '
+            'the host?\n')
+    if LOCKDOWN_DIR.is_dir():
+        args += _v(LOCKDOWN_DIR, ro=True)
+    return args
 
 
 def _x11_args(uid: int, user: str) -> list[str]:
@@ -310,7 +337,10 @@ def run(spec: RunSpec) -> int:
     """
     image = spec.image or (IMAGE_RE if spec.use_re else IMAGE_BASE)
     if image in {IMAGE_BASE, IMAGE_RE}:
-        ensure_image(image, log=lambda line: print(line, file=sys.stderr))  # noqa: T201
+        ensure_image(
+            image,
+            log=lambda line: print(line, file=sys.stderr),  # noqa: T201
+            debian_mirror=spec.debian_mirror)
     argv, cleanup = build_run_argv(spec)
     try:
         return sp.run(argv, check=False).returncode
@@ -416,7 +446,10 @@ def delete_images() -> list[str]:
     return removed
 
 
-def ensure_image(image: str, *, log: Callable[[str], None] = lambda _line: None) -> None:
+def ensure_image(image: str,
+                 *,
+                 log: Callable[[str], None] = lambda _line: None,
+                 debian_mirror: str | None = None) -> None:
     """
     Build ``image`` if it is missing or its build context changed.
 
@@ -426,12 +459,14 @@ def ensure_image(image: str, *, log: Callable[[str], None] = lambda _line: None)
         The image tag to ensure. Only the sbclaude images are auto-built.
     log : Callable[[str], None]
         Sink for build log lines.
+    debian_mirror : str | None
+        Debian archive mirror to bake into the base image when a build is triggered.
     """
     if image not in {IMAGE_BASE, IMAGE_RE} or image_up_to_date(image):
         return
     verb = 'rebuilding (Dockerfile changed)' if image_exists(image) else 'building'
     log(f'Image {image} {verb}...')
-    for line in build_images(with_re=image == IMAGE_RE):
+    for line in build_images(with_re=image == IMAGE_RE, debian_mirror=debian_mirror):
         log(line)
 
 
@@ -509,7 +544,10 @@ def stop(name: str | None = None, project: Path | None = None) -> Iterator[str]:
         yield ctr.name or ''
 
 
-def build_images(*, with_re: bool = True, no_cache: bool = False) -> Iterator[str]:
+def build_images(*,
+                 with_re: bool = True,
+                 no_cache: bool = False,
+                 debian_mirror: str | None = None) -> Iterator[str]:
     """
     Build the sbclaude images, yielding log lines.
 
@@ -519,6 +557,9 @@ def build_images(*, with_re: bool = True, no_cache: bool = False) -> Iterator[st
         Also build the reverse-engineering image.
     no_cache : bool
         Disable the build cache.
+    debian_mirror : str | None
+        Debian archive mirror to bake into the base image's apt sources. The RE image
+        inherits the rewritten sources, so the build argument is passed to the base only.
 
     Yields
     ------
@@ -529,15 +570,18 @@ def build_images(*, with_re: bool = True, no_cache: bool = False) -> Iterator[st
     targets: Sequence[tuple[str, str]] = [(IMAGE_BASE, 'Dockerfile')]
     if with_re:
         targets = [*targets, (IMAGE_RE, 'Dockerfile.re')]
+    mirror = debian_mirror.rstrip('/') if debian_mirror else None
     with resources.as_file(resources.files('sbclaude') / 'docker') as ctx:
         labels = {HASH_LABEL: _dir_hash(Path(ctx))}
         for tag, dockerfile in targets:
             yield f'==> Building {tag} ({dockerfile})'
+            buildargs = {'DEBIAN_MIRROR': mirror} if mirror and dockerfile == 'Dockerfile' else None
             for chunk in client.api.build(path=str(ctx),
                                           dockerfile=dockerfile,
                                           tag=tag,
                                           nocache=no_cache,
                                           labels=labels,
+                                          buildargs=buildargs,
                                           decode=True,
                                           rm=True):
                 line = chunk.get('stream') or chunk.get('error') or ''

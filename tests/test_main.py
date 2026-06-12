@@ -38,6 +38,35 @@ def test_run_config_default_flags(runner: CliRunner, mocker: MockerFixture) -> N
     assert run.call_args[0][0].use_x11
 
 
+def test_run_ios_flag(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--ios'])
+    assert run.call_args[0][0].use_ios
+
+
+def test_run_ios_config_default_flag(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(default_flags=['--ios']))
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].use_ios
+
+
+def test_run_debian_mirror_flag(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--debian-mirror', 'http://m/debian'])
+    assert run.call_args[0][0].debian_mirror == 'http://m/debian'
+
+
+def test_run_debian_mirror_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config',
+                 return_value=Config(debian_mirror='http://cfg/debian'))
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].debian_mirror == 'http://cfg/debian'
+
+
 def test_run_env_flag(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())
@@ -137,8 +166,16 @@ def test_shell_default_multiple(runner: CliRunner, mocker: MockerFixture) -> Non
 
 
 def test_build(runner: CliRunner, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
     mocker.patch('sbclaude.main.container.build_images', return_value=iter(['line1', 'line2']))
     assert 'line1' in runner.invoke(main, ['build', '--no-re']).output
+
+
+def test_build_debian_mirror(runner: CliRunner, mocker: MockerFixture) -> None:
+    build = mocker.patch('sbclaude.main.container.build_images', return_value=iter([]))
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['build', '--no-re', '--debian-mirror', 'http://ftp.us.debian.org/debian'])
+    assert build.call_args.kwargs['debian_mirror'] == 'http://ftp.us.debian.org/debian'
 
 
 def test_config_cmd(runner: CliRunner) -> None:

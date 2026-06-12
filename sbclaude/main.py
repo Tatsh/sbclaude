@@ -36,6 +36,9 @@ def main(ctx: click.Context) -> None:
 @click.option('-r', '--ro', 'ro_extra', multiple=True, help='Extra read-only mount.')
 @click.option('-n', '--name', help='Container name (default: sbclaude-<project>).')
 @click.option('-i', '--image', help='Image override.')
+@click.option('--debian-mirror',
+              help='Debian archive mirror to bake in if the image is (re)built, e.g. '
+              'http://ftp.us.debian.org/debian.')
 @click.option('-R', '--re', 'use_re', is_flag=True, help='RE image + Ghidra + Android tools.')
 @click.option('--ghidra', 'use_ghidra', is_flag=True, help='Mount host Ghidra (read-only).')
 @click.option('--android',
@@ -43,6 +46,10 @@ def main(ctx: click.Context) -> None:
               is_flag=True,
               help='Mount Android SDK + ~/.android + kvm.')
 @click.option('--usb', 'use_usb', is_flag=True, help='Expose /dev/bus/usb for adb.')
+@click.option('--ios',
+              'use_ios',
+              is_flag=True,
+              help='Mount the host usbmuxd socket so frida can reach an iOS device.')
 @click.option('--x11', 'use_x11', is_flag=True, help='Forward DISPLAY + XAUTHORITY for GUIs.')
 @click.option('--net',
               'network',
@@ -58,10 +65,13 @@ def main(ctx: click.Context) -> None:
               help='Disable the container hardening flags (cap-drop, no-new-privileges, ...).')
 @click.option('-d', '--debug', is_flag=True, help='Enable debug level logging.')
 @click.argument('claude_args', nargs=-1, type=click.UNPROCESSED)
-def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ...],
-        env_extra: tuple[str, ...], name: str | None, image: str | None, network: str | None,
+def run(project: Path | None, rw_extra: tuple[str,
+                                              ...], ro_extra: tuple[str,
+                                                                    ...], env_extra: tuple[str,
+                                                                                           ...],
+        name: str | None, image: str | None, network: str | None, debian_mirror: str | None,
         claude_args: tuple[str, ...], *, use_re: bool, use_ghidra: bool, use_android: bool,
-        use_usb: bool, use_x11: bool, no_harden: bool, debug: bool) -> None:
+        use_usb: bool, use_ios: bool, use_x11: bool, no_harden: bool, debug: bool) -> None:
     """Launch claude in a fresh container. Args after ``--`` pass through to claude."""  # noqa: DOC501
     setup_logging(debug=debug, loggers={'sbclaude': {}})
     cfg = load_config()
@@ -70,7 +80,9 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
     use_ghidra = use_ghidra or use_re or '--ghidra' in flags
     use_android = use_android or use_re or '--android' in flags
     use_usb = use_usb or '--usb' in flags
+    use_ios = use_ios or '--ios' in flags
     use_x11 = use_x11 or '--x11' in flags
+    debian_mirror = debian_mirror or cfg.debian_mirror
     proj = (project or Path.cwd()).resolve()
     # Env precedence: config [env] table, then host values for pass_env names, then -e flags.
     env = dict(cfg.env)
@@ -89,11 +101,13 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
                              use_ghidra=use_ghidra,
                              use_android=use_android,
                              use_usb=use_usb,
+                             use_ios=use_ios,
                              use_x11=use_x11,
                              ro=[*expand_paths(cfg.ro), *expand_paths(ro_extra)],
                              rw=[*expand_paths(cfg.rw), *expand_paths(rw_extra)],
                              env=env,
                              harden=cfg.harden and not no_harden,
+                             debian_mirror=debian_mirror,
                              extra_args=cfg.docker_args,
                              claude_args=claude_args)
     try:
@@ -154,9 +168,13 @@ def shell(name: str | None) -> None:
               type=bool,
               help='Skip building the RE image.')
 @click.option('--no-cache', is_flag=True, help='Build without the cache.')
-def build(*, with_re: bool, no_cache: bool) -> None:
+@click.option('--debian-mirror',
+              help='Debian archive mirror to bake into the base image, e.g. '
+              'http://ftp.us.debian.org/debian.')
+def build(debian_mirror: str | None, *, with_re: bool, no_cache: bool) -> None:
     """Build the sbclaude Docker images from the packaged Dockerfiles."""
-    for line in container.build_images(with_re=with_re, no_cache=no_cache):
+    mirror = debian_mirror or load_config().debian_mirror
+    for line in container.build_images(with_re=with_re, no_cache=no_cache, debian_mirror=mirror):
         click.echo(line)
 
 

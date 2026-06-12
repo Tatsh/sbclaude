@@ -98,6 +98,7 @@ more than one is running).
 | `--ghidra`       | mount host Ghidra (`/usr/share/ghidra`) read-only                              |
 | `--android`      | mount Android SDK + `~/.android` + `/dev/kvm` (adb/emulator)                   |
 | `--usb`          | expose `/dev/bus/usb` for adb over USB                                         |
+| `--ios`          | mount the host `usbmuxd` socket so frida reaches an iOS device over USB        |
 | `--x11`          | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator) |
 | `--net bridge`   | isolate the box's network (default is `host` — `localhost` = your host)        |
 | `-r/-w/-p/-n/-i` | extra ro/rw mount, project, container name, image override                     |
@@ -111,12 +112,18 @@ TOML at `~/.config/sbclaude/config.toml` (path from `platformdirs`; override wit
 default_flags = ["--re", "--x11"] # applied to every run
 network = "host"                  # default; "bridge" to isolate the box's network
 # image = "sbclaude-re:latest"       # force an image
+# debian_mirror = "http://ftp.us.debian.org/debian" # apt mirror for image builds
 pass_env = ["AWS_PROFILE", "AWS_REGION"]           # forward these host vars into the box
 ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"] # read-only mounts (globs + ~ ok)
 rw = []                                            # the project dir is always rw automatically
 [env] # inject fixed vars (e.g. Amazon Bedrock)
 CLAUDE_CODE_USE_BEDROCK = "1"
 ```
+
+**Debian mirror** — when `deb.debian.org` is slow, point image builds at a faster archive
+mirror with `debian_mirror` (or `--debian-mirror` on `build`/`run`). Only the base image's
+main archive URI is rewritten; `debian-security` keeps pointing at `deb.debian.org`. The RE
+image inherits the rewritten sources, so a rebuild is only needed if the image is stale.
 
 `ro`/`rw` accept **globs** (`~/dev*` → every matching dir) and `~`; non-matching or
 missing paths are dropped. Every path is mounted at its real absolute path, so a host
@@ -139,13 +146,14 @@ box instead of `~/.claude`.
 MCP server configs live in your mounted `~/.claude.json`, so they carry into the box — but
 the server **command must be runnable inside the container**. A host Python _venv_ won't
 work: its `bin/python` symlinks to a host-only interpreter (e.g. `/usr/bin/python3.13`),
-which doesn't exist in the box → `ENOENT`. The image ships **Python 3 (with the `mcp` SDK)
-and `uv`**, so point the command at one of:
+which doesn't exist in the box → `ENOENT`. The image ships **Python 3 in a virtualenv at
+`/opt/venv` (with the `mcp` SDK pre-installed) and `uv`**, so point the command at one of:
 
 - `uv run /abs/path/to/server.py` — best: reads the script's PEP 723 deps, works on the
   host too. Example: `claude mcp add ghidra -- uv run ~/dev/ghidra-mcp/bridge_mcp_ghidra.py`.
-- `/usr/bin/python3 /abs/path/to/server.py` — the container's Python (has `mcp`
-  pre-installed); container-only.
+- `/opt/venv/bin/python3 /abs/path/to/server.py` — the container's venv Python (has `mcp`
+  pre-installed); container-only. `/opt/venv/bin` is first on `PATH`, so a bare `python3`
+  resolves here too.
 
 A server that talks to a process on the host (e.g. a Ghidra GUI on `localhost`) works out
 of the box because the box defaults to host networking; pass `--net bridge` only if you
@@ -173,6 +181,21 @@ sbclaude run --re --x11 -p ~/dev/some-apk-re
 `--x11` mounts `/tmp/.X11-unix` + your session xauth cookie and sets `DISPLAY`/
 `XAUTHORITY`. Java/Swing (Ghidra) renders through XWayland (`:0`). If a GUI fails with a
 cookie error, run on the host: `xhost +SI:localuser:$USER`.
+
+`--ios` targets an **iOS** device attached to the host. The host runs `usbmuxd` (it owns
+the USB device), and frida's usbmux backend reaches the device through that daemon's
+socket — so instead of claiming raw USB (which would clash with the host `usbmuxd`),
+`--ios` bind-mounts `/var/run/usbmuxd` plus the host's `/var/lib/lockdown` pairing
+records. Combine with `--re` so frida is present:
+
+```sh
+sbclaude run --re --ios -p ~/dev/some-ios-re
+#   inside: frida-ls-devices            # the host's device shows up over usbmux
+#           frida -U -f com.x.y -l hook.js
+```
+
+The host needs `usbmuxd` running and the device already paired (trusted). If frida sees
+no device, confirm `idevice_id -l` works on the host first.
 
 ## Hardening
 
