@@ -9,6 +9,7 @@ appinfo
 asyncio
 autodoc
 automodule
+autoremove
 autoupdater
 autouse
 avdmanager
@@ -17,6 +18,7 @@ bascom
 binutils
 bsdmainutils
 bsky
+buildargs
 cdrommsf
 cmdline
 codesign
@@ -65,6 +67,7 @@ globaltoc
 gosu
 hoverxref
 htmlcov
+idevice
 incl
 intersphinx
 isort
@@ -101,6 +104,7 @@ libxss
 libxtst
 linters
 localuser
+lockdownd
 logname
 manylinux
 mktemp
@@ -109,6 +113,8 @@ monkeypatch
 myproject
 mypy
 namedtuples
+nodesource
+nodistro
 noninteractive
 norecursedirs
 notarytool
@@ -168,6 +174,8 @@ ubyte
 udvare
 undraft
 undrafted
+usbmux
+usbmuxd
 usbutils
 vars
 vendored
