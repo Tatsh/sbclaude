@@ -182,7 +182,10 @@ def claude_binary() -> Path:
 
 def _patched_settings(settings: Path) -> Path:
     """
-    Write a copy of ``settings.json`` with the bash sandbox disabled.
+    Write a copy of ``settings.json`` patched for the no-prompt fullscreen box.
+
+    The bash sandbox is disabled, the dangerous-mode permission prompt is skipped, and
+    the TUI is forced to fullscreen.
 
     Parameters
     ----------
@@ -198,7 +201,8 @@ def _patched_settings(settings: Path) -> Path:
         'sandbox': {
             'enabled': False
         },
-        'skipDangerousModePermissionPrompt': True
+        'skipDangerousModePermissionPrompt': True,
+        'tui': 'fullscreen'
     }
     fd, name = tempfile.mkstemp(prefix='sbclaude-settings.', suffix='.json')
     with os.fdopen(fd, 'w') as handle:

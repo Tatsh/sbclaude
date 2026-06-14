@@ -91,6 +91,7 @@ def test_build_run_argv_patches_settings(mocker: MockerFixture, tmp_path: Path) 
     data = json.loads(cleanup.read_text())
     assert data['sandbox'] == {'enabled': False}
     assert data['skipDangerousModePermissionPrompt']
+    assert data['tui'] == 'fullscreen'
     assert data['keep'] == 1
     cleanup.unlink()
 
