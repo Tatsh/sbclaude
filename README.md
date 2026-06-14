@@ -134,10 +134,21 @@ read-write and overlays any read-only parent (e.g. `~/dev` ro + `~/dev/proj` rw 
 is writable).
 
 **Environment variables** — inject with the `[env]` table, forward host values by name
-with `pass_env`, or per-run with `-e KEY=VALUE` (precedence: `[env]` < `pass_env` < `-e`).
-This is how you point the box at a different backend such as **Amazon Bedrock**
-(`CLAUDE_CODE_USE_BEDROCK=1` + your `AWS_*` vars; mount `~/.aws` via `ro` if you use
-profiles).
+with `pass_env`, or per-run with `-e KEY=VALUE` (precedence: managed defaults < `[env]` <
+`pass_env` < `-e`). This is how you point the box at a different backend such as **Amazon
+Bedrock** (`CLAUDE_CODE_USE_BEDROCK=1` + your `AWS_*` vars; mount `~/.aws` via `ro` if you
+use profiles).
+
+**uv project environment** — by default the box sets `UV_PROJECT_ENVIRONMENT` to a
+container-local path (`/tmp/sbclaude-uv-<project>`), so `uv sync`/`uv run` build the
+virtualenv there instead of writing `.venv` into your bind-mounted project. A host-built
+`.venv` hard-codes the host interpreter path and would not resolve in the box anyway; the
+container is throwaway, so the redirected env is rebuilt per run. Override it by setting
+your own `UV_PROJECT_ENVIRONMENT` (via `[env]` or `-e`), or disable the behaviour entirely
+with `manage_uv_env = false`. There is no clean equivalent for Node — `node_modules` is
+fixed to the package root by Node's resolver (only Yarn Berry's `YARN_NODE_LINKER=pnp`
+removes it, at the cost of changing module resolution), and `node_modules` built on the
+box's Linux is usually reusable on a Linux host anyway, so it is left untouched.
 
 **Alternate config dir** — if `CLAUDE_CONFIG_DIR` is set on the host, sbclaude mounts that
 directory (its `.claude.json`, `settings.json`, history) and points claude at it inside the

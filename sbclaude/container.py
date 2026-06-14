@@ -31,7 +31,8 @@ if TYPE_CHECKING:
 
 __all__ = ('IMAGE_BASE', 'IMAGE_RE', 'LABEL', 'RunSpec', 'build_images', 'config_dir',
            'default_name', 'delete_images', 'ensure_image', 'image_exists', 'image_up_to_date',
-           'list_managed', 'project_containers', 'run', 'shell', 'stop', 'unique_name')
+           'list_managed', 'project_containers', 'run', 'shell', 'stop', 'unique_name',
+           'uv_project_environment')
 
 LABEL = 'sbclaude.managed'
 """Docker label marking a container as sbclaude-managed."""
@@ -51,6 +52,10 @@ USBMUXD_SOCKET = Path('/var/run/usbmuxd')
 """Host usbmuxd socket that frida's usbmux backend uses to reach an iOS device."""
 LOCKDOWN_DIR = Path('/var/lib/lockdown')
 """Host lockdownd pairing-records directory, mounted read-only so iOS pairing carries in."""
+UV_ENV_PREFIX = '/tmp/sbclaude-uv-'  # noqa: S108
+"""Prefix for the container-local uv project environment (keeps it out of the project)."""
+_NAME_SANITIZE = re.compile(r'[^a-zA-Z0-9_.-]')
+"""Pattern matching characters not allowed in a derived container or path name."""
 
 
 @dataclass
@@ -111,7 +116,28 @@ def default_name(project: Path) -> str:
     str
         A docker-safe container name.
     """
-    return f'sbclaude-{re.sub(r"[^a-zA-Z0-9_.-]", "-", project.name)}'
+    return f'sbclaude-{_NAME_SANITIZE.sub("-", project.name)}'
+
+
+def uv_project_environment(project: Path) -> str:
+    """
+    Derive the container-local uv project-environment path for a project.
+
+    Pointing ``UV_PROJECT_ENVIRONMENT`` here keeps uv from creating or reading a
+    ``.venv`` inside the bind-mounted project, so the box never touches the host's
+    virtualenv (whose interpreter paths would not resolve in the container anyway).
+
+    Parameters
+    ----------
+    project : Path
+        The project directory.
+
+    Returns
+    -------
+    str
+        An absolute path under ``/tmp`` unique to the project name.
+    """
+    return f'{UV_ENV_PREFIX}{_NAME_SANITIZE.sub("-", project.name)}'
 
 
 def unique_name(project: Path) -> str:

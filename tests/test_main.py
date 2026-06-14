@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from sbclaude import container
 from sbclaude.config import Config
 from sbclaude.main import main
 
@@ -85,11 +86,52 @@ def test_run_debian_mirror_from_config(runner: CliRunner, mocker: MockerFixture)
     assert run.call_args[0][0].debian_mirror == 'http://cfg/debian'
 
 
+def test_run_manages_uv_env_by_default(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run'])
+    spec = run.call_args[0][0]
+    assert spec.env['UV_PROJECT_ENVIRONMENT'] == container.uv_project_environment(spec.project)
+
+
+def test_run_uv_env_override_wins(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config',
+                 return_value=Config(env={'UV_PROJECT_ENVIRONMENT': '/custom/env'}))
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].env['UV_PROJECT_ENVIRONMENT'] == '/custom/env'
+
+
+def test_run_manage_uv_env_disabled(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(manage_uv_env=False))
+    runner.invoke(main, ['run'])
+    assert 'UV_PROJECT_ENVIRONMENT' not in run.call_args[0][0].env
+
+
+def test_run_uv_env_override_by_e_flag(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '-e', 'UV_PROJECT_ENVIRONMENT=/from/flag'])
+    assert run.call_args[0][0].env['UV_PROJECT_ENVIRONMENT'] == '/from/flag'
+
+
+def test_run_uv_env_override_by_pass_env(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config',
+                 return_value=Config(pass_env=['UV_PROJECT_ENVIRONMENT']))
+    mocker.patch.dict('os.environ', {'UV_PROJECT_ENVIRONMENT': '/from/host'})
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].env['UV_PROJECT_ENVIRONMENT'] == '/from/host'
+
+
 def test_run_env_flag(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())
     runner.invoke(main, ['run', '-e', 'CLAUDE_CODE_USE_BEDROCK=1', '-e', 'AWS_REGION=us-east-1'])
-    assert run.call_args[0][0].env == {'CLAUDE_CODE_USE_BEDROCK': '1', 'AWS_REGION': 'us-east-1'}
+    env = run.call_args[0][0].env
+    assert env['CLAUDE_CODE_USE_BEDROCK'] == '1'
+    assert env['AWS_REGION'] == 'us-east-1'
 
 
 def test_run_env_bad(runner: CliRunner, mocker: MockerFixture) -> None:

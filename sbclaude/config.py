@@ -67,6 +67,8 @@ class Config:
     """Debian archive mirror used when building the images, or ``None`` for the default."""
     harden: bool = True
     """Whether to apply the container hardening flags."""
+    manage_uv_env: bool = True
+    """Whether to point ``UV_PROJECT_ENVIRONMENT`` at a container-local path by default."""
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -99,7 +101,8 @@ def load_config(path: Path | None = None) -> Config:
                   image=(str(data['image']) if data.get('image') else None),
                   network=str(data.get('network', DEFAULT_NETWORK)),
                   debian_mirror=(str(data['debian_mirror']) if data.get('debian_mirror') else None),
-                  harden=bool(data.get('harden', True)))
+                  harden=bool(data.get('harden', True)),
+                  manage_uv_env=bool(data.get('manage_uv_env', True)))
 
 
 def expand_paths(patterns: Sequence[str]) -> Iterator[Path]:

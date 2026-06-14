@@ -13,11 +13,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Run several boxes against the same project directory at once; each `run` gets a uniquely
   suffixed container name (override with `-n`).
+- `--ios` flag on `run`, mounting the host `usbmuxd` socket and `/var/lib/lockdown` so frida
+  reaches an iOS device over USB.
+- `--debian-mirror` option on `build` and `run`, plus a `debian_mirror` config key, to build the
+  base image against an alternate Debian archive mirror.
+- `--ssh` and `--gpg` flags on `run`, opt-in mounts of the host `~/.ssh` (read-only) and the host
+  GnuPG home and agent socket for SSH git remotes and signed commits.
+- The box now points `UV_PROJECT_ENVIRONMENT` at a container-local path by default so `uv` does
+  not write a `.venv` into the bind-mounted project; opt out with the `manage_uv_env` config key.
 
 ### Changed
 
 - `stop` with no arguments now stops every box for the current project, and `shell` selects the
   project's box automatically, asking for `-n NAME` when more than one is running.
+- The base image now ships Node.js 24 with Yarn (via Corepack), the MCP SDK in `/opt/venv`, and
+  `gnupg` and `openssh-client`.
 
 ### Fixed
 

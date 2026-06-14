@@ -26,6 +26,20 @@ def test_unique_name() -> None:
     assert name != container.unique_name(Path('/a/b/My Proj'))
 
 
+def test_uv_project_environment() -> None:
+    assert container.uv_project_environment(
+        Path('/a/b/My Proj')) == f'{container.UV_ENV_PREFIX}My-Proj'
+
+
+@pytest.mark.parametrize(('name', 'expected'), [
+    ('a@b:c d', 'a-b-c-d'),
+    ('keep.this_one-here', 'keep.this_one-here'),
+])
+def test_uv_project_environment_sanitises(name: str, expected: str) -> None:
+    assert container.uv_project_environment(
+        Path('/a/b') / name) == f'{container.UV_ENV_PREFIX}{expected}'
+
+
 def test_claude_binary_missing(mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.container.which', return_value=None)
     with pytest.raises(FileNotFoundError):

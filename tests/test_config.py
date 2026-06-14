@@ -35,6 +35,18 @@ def test_load_config_debian_mirror(tmp_path: Path) -> None:
     assert load_config(path).debian_mirror == 'http://ftp.us.debian.org/debian'
 
 
+def test_load_config_manage_uv_env_default_true(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('network = "host"\n')
+    assert load_config(path).manage_uv_env is True
+
+
+def test_load_config_manage_uv_env_false(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('manage_uv_env = false\n')
+    assert load_config(path).manage_uv_env is False
+
+
 def test_expand_paths_glob(tmp_path: Path) -> None:
     (tmp_path / 'dev1').mkdir()
     (tmp_path / 'dev2').mkdir()

@@ -92,8 +92,13 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
     use_gpg = use_gpg or '--gpg' in flags
     debian_mirror = debian_mirror or cfg.debian_mirror
     proj = (project or Path.cwd()).resolve()
-    # Env precedence: config [env] table, then host values for pass_env names, then -e flags.
-    env = dict(cfg.env)
+    # Env precedence (lowest to highest): the managed UV_PROJECT_ENVIRONMENT default, the
+    # config [env] table, host values for pass_env names, then -e flags. Seeding the uv
+    # default first lets the user override or unset it through any of the later layers.
+    env: dict[str, str] = {}
+    if cfg.manage_uv_env:
+        env['UV_PROJECT_ENVIRONMENT'] = container.uv_project_environment(proj)
+    env.update(cfg.env)
     env.update({k: os.environ[k] for k in cfg.pass_env if k in os.environ})
     for item in env_extra:
         key, sep, value = item.partition('=')
