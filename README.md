@@ -204,7 +204,11 @@ plus `~/.android` (adb keys + AVDs) and `/dev/kvm` for emulator acceleration.
 
 Installed in the image: **Temurin JDK 21** (Ghidra 12 needs it), **build-essential** +
 binutils, **frida** + frida-tools (pinned to the host version), **mitmproxy**,
-**dex2jar**, **baksmali/smali**, and the X11/GL/audio libs the mounted GUI binaries need.
+**dex2jar**, **baksmali/smali**, CLI **audio tools** (ffmpeg, sox, flac, vorbis-tools,
+opus-tools, lame, mpg123, wavpack, shntool, plus **vgmstream-cli** for game audio), CLI
+**image tools** (ImageMagick, zbar, **deark**, **pngdefry** for `-iphone` PNGs),
+**czkawka-cli** (duplicate/similar finder), and the X11/GL/audio libs the mounted GUI
+binaries need.
 
 ```sh
 sbclaude run --re --x11 -p ~/dev/some-apk-re

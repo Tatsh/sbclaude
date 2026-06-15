@@ -13,12 +13,15 @@ FROM sbclaude:latest
 ENV DEBIAN_FRONTEND=noninteractive
 
 # --- Temurin (Adoptium) JDK 21 (Ghidra 12.x needs it; fine for jadx/apktool/baksmali),
-#     the build toolchain, binutils, analysis utilities, and the X11/GL/audio libs the
-#     MOUNTED Ghidra GUI, jadx-gui and Android emulator dynamically link against.
-#     usbutils is for `adb` over USB. One apt layer: register the Adoptium repo
-#     (armoured .asc key via curl inherited from the base — no gnupg/dearmor), then a
-#     single update + install. python3*, curl, and wget already come from the base
-#     image (wget pulls the dex2jar/baksmali jars below). ---
+#     the build toolchain, binutils, analysis utilities, CLI audio tools (ffmpeg, sox and
+#     the common codec front-ends for extracting and converting game audio), CLI image
+#     tools (ImageMagick, zbar for barcodes/QR), and the X11/GL/audio libs the MOUNTED
+#     Ghidra GUI, jadx-gui and Android emulator dynamically
+#     link against. The libao/mpg123/vorbis/speex runtime libs are what the vgmstream-cli
+#     binary installed below links against. usbutils is for `adb` over USB. One apt layer:
+#     register the Adoptium repo (armoured .asc key via curl inherited from the base — no
+#     gnupg/dearmor), then a single update + install. python3*, curl, and wget already
+#     come from the base image (wget pulls the dex2jar/baksmali/vgmstream archives). ---
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
         -o /etc/apt/keyrings/adoptium.asc \
@@ -30,6 +33,9 @@ RUN mkdir -p /etc/apt/keyrings \
         binutils file xxd bsdmainutils \
         openssl unzip zip xz-utils p7zip-full \
         usbutils \
+        ffmpeg sox libsox-fmt-all flac vorbis-tools opus-tools lame mpg123 wavpack shntool \
+        libao4 libmpg123-0 libvorbis0a libvorbisfile3 libspeex1 \
+        imagemagick zbar-tools \
         x11-utils x11-xserver-utils xauth \
         libgl1 libgl1-mesa-dri libglu1-mesa \
         libpulse0 libasound2 libnss3 \
@@ -67,6 +73,34 @@ RUN set -eux; \
 # dex2jar convenience launcher (d2j-dex2jar)
 RUN printf '#!/usr/bin/env bash\nexec /opt/dex2jar/d2j-dex2jar.sh "$@"\n' > /usr/local/bin/d2j-dex2jar && \
     chmod +x /usr/local/bin/d2j-dex2jar
+
+# --- vgmstream-cli: video-game stream audio decoder (absent on host). The project ships
+#     an official Linux build; grab the latest release asset and drop the CLI on PATH. It
+#     links against the libao/mpg123/vorbis/speex/ffmpeg libs installed above. ---
+RUN wget -qO /tmp/vgmstream.zip \
+        https://github.com/vgmstream/vgmstream/releases/latest/download/vgmstream-linux.zip && \
+    unzip -q /tmp/vgmstream.zip -d /tmp/vgmstream && \
+    install -m 0755 /tmp/vgmstream/vgmstream-cli /usr/local/bin/vgmstream-cli && \
+    rm -rf /tmp/vgmstream.zip /tmp/vgmstream
+
+# --- deark: extract and convert data from many (often retro) file formats (absent on
+#     host). Pure C with no extra dependencies, so build the latest source with make. ---
+RUN git clone --depth 1 https://github.com/jsummers/deark /tmp/deark && \
+    make -C /tmp/deark && \
+    install -m 0755 /tmp/deark/deark /usr/local/bin/deark && \
+    rm -rf /tmp/deark
+
+# --- czkawka-cli: find duplicate and visually similar files/images (absent on host); the
+#     project ships an official glibc Linux CLI build. ---
+RUN wget -qO /usr/local/bin/czkawka_cli \
+        https://github.com/qarmin/czkawka/releases/latest/download/linux_czkawka_cli_x86_64 && \
+    chmod +x /usr/local/bin/czkawka_cli
+
+# --- pngdefry: undo Apple's `-iphone` PNG optimisation (CgBI chunk, BGRA, premultiplied
+#     alpha) (absent on host). A single C source (bundling miniz), compiled directly. ---
+RUN git clone --depth 1 https://github.com/Tatsh/pngdefry /tmp/pngdefry && \
+    cc -O2 -o /usr/local/bin/pngdefry /tmp/pngdefry/source/pngdefry.c && \
+    rm -rf /tmp/pngdefry
 
 # Launchers for the host-MOUNTED tools (jars/scripts arrive via bind mounts at run time).
 COPY bin/apktool bin/analyzeHeadless bin/ghidraRun /usr/local/bin/
