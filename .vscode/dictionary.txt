@@ -120,6 +120,7 @@ nodesource
 nodistro
 noninteractive
 norecursedirs
+nosystem
 notarytool
 numpy
 onefile
