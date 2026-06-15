@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 import json
 import os
+import subprocess as sp
 import tempfile
 
 from sbclaude import container
@@ -108,6 +109,37 @@ def test_build_run_argv_extra_mounts(mocker: MockerFixture, tmp_path: Path) -> N
     assert f'{ro}:{ro}:ro' in argv
     # The project is skipped from rw extras (already mounted rw).
     assert argv.count(f'{project}:{project}') == 1
+
+
+def test_build_run_argv_gitconfig_includes(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    gitconfig = tmp_path / '.gitconfig'
+    gitconfig.write_text('[include]\n')
+    included = tmp_path / 'work.gitconfig'
+    included.write_text('[user]\n')
+    out = (f'file:{gitconfig}\tinclude.path={included}\n'
+           f'file:{included}\tuser.email=work@example.com\n')
+    mocker.patch('sbclaude.container.sp.run', return_value=mocker.MagicMock(stdout=out))
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n'))
+    assert f'{gitconfig}:{gitconfig}:ro' in argv
+    assert f'{included}:{included}:ro' in argv
+
+
+@pytest.mark.parametrize('exc', [FileNotFoundError(), sp.CalledProcessError(128, 'git')])
+def test_build_run_argv_gitconfig_fallback(exc: Exception, mocker: MockerFixture,
+                                           tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    gitconfig = tmp_path / '.gitconfig'
+    gitconfig.write_text('[user]\n')
+    mocker.patch('sbclaude.container.sp.run', side_effect=exc)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n'))
+    assert f'{gitconfig}:{gitconfig}:ro' in argv
 
 
 def test_run_invokes_subprocess(mocker: MockerFixture, tmp_path: Path) -> None:

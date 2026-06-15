@@ -43,11 +43,12 @@ ARG DEBIAN_MIRROR=""
 # Yarn shim is enabled in the same layer so `yarn` resolves to whatever version each
 # project pins via its `packageManager` field (this repo pins Yarn 4.x, checked into
 # .yarn/releases, so it runs offline) instead of a single globally pinned version.
-# Finally the MCP SDK is installed into a dedicated virtualenv at /opt/venv (never the
-# PEP 668 externally-managed system interpreter) so Python MCP servers (e.g. the
-# ghidra-mcp PEP 723 bridge) start with no first-run download that could trip the MCP
-# connection timeout. /opt/venv is outside any mounted project directory, and its bin
-# is placed first on PATH below so `python3` and `pip` resolve to it.
+# Finally the MCP SDK and pre-commit are installed into a dedicated virtualenv at
+# /opt/venv (never the PEP 668 externally-managed system interpreter) so Python MCP
+# servers (e.g. the ghidra-mcp PEP 723 bridge) start with no first-run download that
+# could trip the MCP connection timeout, and `pre-commit` is on PATH for commits made in
+# the box. /opt/venv is outside any mounted project directory, and its bin is placed
+# first on PATH below so `python3` and `pip` resolve to it.
 RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         sed -i -E "s|^(URIs:[[:space:]]*)https?://deb.debian.org/debian[[:space:]]*\$|\1$DEBIAN_MIRROR|" \
             /etc/apt/sources.list.d/debian.sources; \
@@ -75,7 +76,7 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
     && sed -i 's/^# *\(en_GB.UTF-8\)/\1/' /etc/locale.gen && locale-gen \
     && python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir mcp \
+    && /opt/venv/bin/pip install --no-cache-dir mcp pre-commit \
     && rm -rf /var/lib/apt/lists/*
 
 # PATH puts the venv first so `python3`/`pip` are the venv's; LANG/LC_ALL/LANGUAGE pin

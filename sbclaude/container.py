@@ -278,9 +278,7 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         # throwaway temp file, leaving the host settings.json untouched.
         cleanup = _patched_settings(settings)
         argv += _v(cleanup, cfg_dir / 'settings.json')
-    gitconfig = home / '.gitconfig'
-    if gitconfig.is_file():
-        argv += _v(gitconfig, ro=True)
+    argv += _gitconfig_args(home)
     for path in spec.ro:
         if path != spec.project:
             argv += _v(path, ro=True)
@@ -377,6 +375,43 @@ def _gpg_args(home: Path) -> list[str]:
     if (socket := _gpg_agent_socket()) and socket.is_socket() \
             and not socket.is_relative_to(homedir):
         args += _v(socket, homedir / 'S.gpg-agent')
+    return args
+
+
+def _global_gitconfig_files(home: Path) -> Iterator[Path]:
+    # Enumerate the global git config files: the main ~/.gitconfig plus every file it
+    # pulls in via include.path / includeIf. --includes is off by default when a specific
+    # scope (--global) is given, so it must be requested explicitly. HOME is overridden so
+    # the include paths resolve the same way they will inside the box.
+    env = {**os.environ, 'HOME': str(home), 'GIT_CONFIG_NOSYSTEM': '1'}
+    try:
+        out = sp.run(
+            ['git', 'config', '--global', '--list', '--show-origin', '--includes'],  # noqa: S607
+            capture_output=True,
+            check=True,
+            env=env,
+            text=True).stdout
+    except (FileNotFoundError, sp.CalledProcessError):
+        return
+    seen: set[Path] = set()
+    for line in out.splitlines():
+        origin = line.split('\t', 1)[0]
+        if origin.startswith('file:'):
+            path = Path(origin.removeprefix('file:')).expanduser()
+            if path not in seen and path.is_file():
+                seen.add(path)
+                yield path
+
+
+def _gitconfig_args(home: Path) -> list[str]:
+    # Mount the user's global git config and every file it includes read-only, so git and
+    # pre-commit inside the box see the full configuration. Fall back to the plain
+    # ~/.gitconfig when git cannot enumerate it (e.g. git missing on the host).
+    args: list[str] = []
+    for path in _global_gitconfig_files(home):
+        args += _v(path, ro=True)
+    if not args and (gitconfig := home / '.gitconfig').is_file():
+        args += _v(gitconfig, ro=True)
     return args
 
 

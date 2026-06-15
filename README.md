@@ -160,7 +160,8 @@ MCP server configs live in your mounted `~/.claude.json`, so they carry into the
 the server **command must be runnable inside the container**. A host Python _venv_ won't
 work: its `bin/python` symlinks to a host-only interpreter (e.g. `/usr/bin/python3.13`),
 which doesn't exist in the box → `ENOENT`. The image ships **Python 3 in a virtualenv at
-`/opt/venv` (with the `mcp` SDK pre-installed) and `uv`**, so point the command at one of:
+`/opt/venv` (with the `mcp` SDK and `pre-commit` pre-installed) and `uv`**, so point the
+command at one of:
 
 - `uv run /abs/path/to/server.py` — best: reads the script's PEP 723 deps, works on the
   host too. Example: `claude mcp add ghidra -- uv run ~/dev/ghidra-mcp/bridge_mcp_ghidra.py`.
@@ -190,6 +191,10 @@ Opt in per run, or globally with `default_flags = ["--ssh", "--gpg"]`:
 ```sh
 sbclaude run --ssh --gpg -p ~/dev/foo   # inside: git push, git commit -S both work
 ```
+
+Your `~/.gitconfig` is always mounted read-only, along with every file it pulls in via an
+`[include] path = ...` directive (resolved with `git config --includes`), so a split config
+carries into the box intact.
 
 ## RE toolchain (`--re`)
 
