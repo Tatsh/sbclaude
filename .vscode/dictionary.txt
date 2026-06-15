@@ -9,12 +9,12 @@ appinfo
 asyncio
 autodoc
 automodule
-autoremove
 autoupdater
 autouse
 avdmanager
 baksmali
 bascom
+bgra
 binutils
 bsdmainutils
 bsky
@@ -29,10 +29,12 @@ cooldown
 coveragerc
 coverallsapp
 ctypes
+czkawka
 dashcam
 dataclasses
 datatable
 datatables
+deark
 dearmor
 debugpy
 defense
@@ -56,6 +58,7 @@ flathub
 fowner
 foxundermoon
 frida
+frida's
 functools
 genindex
 getgid
@@ -83,6 +86,7 @@ kwargs
 lastexitcode
 launchable
 lextudio
+libao
 libasound
 libera
 libfontconfig
@@ -90,9 +94,14 @@ libfreetype
 libgl
 libglu
 libjsonnet
+libmpg
 libnss
 libpulse
 libsonnet
+libsox
+libspeex
+libvorbis
+libvorbisfile
 libx
 libxcb
 libxcomposite
@@ -110,6 +119,7 @@ localuser
 lockdownd
 logname
 manylinux
+miniz
 mktemp
 modindex
 monkeypatch
@@ -132,6 +142,7 @@ pinentry
 pipx
 platformdirs
 plistlib
+pngdefry
 preapproved
 prodvers
 pycache
@@ -158,12 +169,14 @@ setgid
 setuid
 shellcheck
 shellformat
+shntool
 signingkey
 signtool
 smali
 snapcore
 snapcraft
 soupsieve
+speex
 sphinxcontrib
 syft
 tatsh
@@ -189,7 +202,9 @@ vendored
 venv
 venv's
 vers
+vgmstream
 virtualenv
+wavpack
 winget
 wiswa
 wiswa's
@@ -204,4 +219,5 @@ xterm
 yapf
 yapfignore
 yarnrc
+zbar
 zizmor
