@@ -13,6 +13,9 @@ from .config import config_path, expand_paths, load_config
 
 __all__ = ('main',)
 
+DEFAULT_PASS_ENV = ('AWS_PROFILE',)
+"""Host environment variables forwarded into the box by default when set."""
+
 
 @click.group(invoke_without_command=True, context_settings={'help_option_names': ('-h', '--help')})
 @click.version_option()
@@ -39,6 +42,10 @@ def main(ctx: click.Context) -> None:
 @click.option('--debian-mirror',
               help='Debian archive mirror to bake in if the image is (re)built, e.g. '
               'http://ftp.us.debian.org/debian.')
+@click.option('--memory',
+              help="Docker memory limit, e.g. 8g. Default auto-caps from host RAM; '0' "
+              'disables. Only applied when hardening is on.')
+@click.option('--cpus', help='Docker CPU limit, e.g. 4. Only applied when hardening is on.')
 @click.option('-R', '--re', 'use_re', is_flag=True, help='RE image + Ghidra + Android tools.')
 @click.option('--ghidra', 'use_ghidra', is_flag=True, help='Mount host Ghidra (read-only).')
 @click.option('--android',
@@ -75,9 +82,10 @@ def main(ctx: click.Context) -> None:
 @click.argument('claude_args', nargs=-1, type=click.UNPROCESSED)
 def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ...],
         env_extra: tuple[str, ...], name: str | None, image: str | None, network: str | None,
-        debian_mirror: str | None, claude_args: tuple[str, ...], *, use_re: bool, use_ghidra: bool,
-        use_android: bool, use_usb: bool, use_ios: bool, use_x11: bool, use_ssh: bool,
-        use_gpg: bool, no_harden: bool, debug: bool) -> None:
+        debian_mirror: str | None, memory: str | None, cpus: str | None, claude_args: tuple[str,
+                                                                                            ...], *,
+        use_re: bool, use_ghidra: bool, use_android: bool, use_usb: bool, use_ios: bool,
+        use_x11: bool, use_ssh: bool, use_gpg: bool, no_harden: bool, debug: bool) -> None:
     """Launch claude in a fresh container. Args after ``--`` pass through to claude."""  # noqa: DOC501
     setup_logging(debug=debug, loggers={'sbclaude': {}})
     cfg = load_config()
@@ -91,6 +99,8 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
     use_ssh = use_ssh or '--ssh' in flags
     use_gpg = use_gpg or '--gpg' in flags
     debian_mirror = debian_mirror or cfg.debian_mirror
+    memory = memory or cfg.memory
+    cpus = cpus or cfg.cpus
     proj = (project or Path.cwd()).resolve()
     # Env precedence (lowest to highest): the managed UV_PROJECT_ENVIRONMENT default, the
     # config [env] table, host values for pass_env names, then -e flags. Seeding the uv
@@ -99,7 +109,7 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
     if cfg.manage_uv_env:
         env['UV_PROJECT_ENVIRONMENT'] = container.uv_project_environment(proj)
     env.update(cfg.env)
-    env.update({k: os.environ[k] for k in cfg.pass_env if k in os.environ})
+    env.update({k: os.environ[k] for k in (*DEFAULT_PASS_ENV, *cfg.pass_env) if k in os.environ})
     for item in env_extra:
         key, sep, value = item.partition('=')
         if not sep:
@@ -122,6 +132,8 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
                              rw=[*expand_paths(cfg.rw), *expand_paths(rw_extra)],
                              env=env,
                              harden=cfg.harden and not no_harden,
+                             memory=memory,
+                             cpus=cpus,
                              debian_mirror=debian_mirror,
                              extra_args=cfg.docker_args,
                              claude_args=claude_args)

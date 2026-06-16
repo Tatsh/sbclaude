@@ -47,6 +47,14 @@ def test_load_config_manage_uv_env_false(tmp_path: Path) -> None:
     assert load_config(path).manage_uv_env is False
 
 
+def test_load_config_memory_cpus(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('memory = "8g"\ncpus = "4"\n')
+    cfg = load_config(path)
+    assert cfg.memory == '8g'
+    assert cfg.cpus == '4'
+
+
 def test_expand_paths_glob(tmp_path: Path) -> None:
     (tmp_path / 'dev1').mkdir()
     (tmp_path / 'dev2').mkdir()

@@ -13,14 +13,15 @@ FROM sbclaude:latest
 ENV DEBIAN_FRONTEND=noninteractive
 
 # --- Temurin (Adoptium) JDK 21 (Ghidra 12.x needs it; fine for jadx/apktool/baksmali),
-#     the build toolchain, binutils, analysis utilities, CLI audio tools (ffmpeg, sox and
-#     the common codec front-ends for extracting and converting game audio), CLI image
-#     tools (ImageMagick, zbar for barcodes/QR), and the X11/GL/audio libs the MOUNTED
-#     Ghidra GUI, jadx-gui and Android emulator dynamically
-#     link against. The libao/mpg123/vorbis/speex runtime libs are what the vgmstream-cli
-#     binary installed below links against. usbutils is for `adb` over USB. One apt layer:
-#     register the Adoptium repo (armoured .asc key via curl inherited from the base — no
-#     gnupg/dearmor), then a single update + install. python3*, curl, and wget already
+#     cmake (build-essential and pkg-config come from the base), binutils, analysis
+#     utilities, CLI audio tools (ffmpeg, sox and the common codec front-ends for
+#     extracting and converting game audio), CLI image tools (ImageMagick, zbar for
+#     barcodes/QR), and the X11/GL/audio libs the MOUNTED Ghidra GUI, jadx-gui and Android
+#     emulator dynamically link against. The libao/mpg123/vorbis/speex runtime libs are
+#     what the vgmstream-cli binary installed below links against. usbutils is for `adb`
+#     over USB. One apt layer: register the Adoptium repo (armoured .asc key via curl
+#     inherited from the base — no gnupg/dearmor), then a single update + install.
+#     python3*, curl, and wget already
 #     come from the base image (wget pulls the dex2jar/baksmali/vgmstream archives). ---
 RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
@@ -29,7 +30,7 @@ RUN mkdir -p /etc/apt/keyrings \
         > /etc/apt/sources.list.d/adoptium.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         temurin-21-jdk \
-        build-essential gcc g++ make pkg-config cmake \
+        cmake \
         binutils file xxd bsdmainutils \
         openssl unzip zip xz-utils p7zip-full \
         usbutils \

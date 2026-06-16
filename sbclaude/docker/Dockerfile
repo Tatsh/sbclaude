@@ -28,18 +28,22 @@ ARG DEBIAN_MIRROR=""
 # fetched and its HTTPS repo reached, so a second update + the main install follow. wget
 # lives here, not just in Dockerfile.re, so the RE image inherits it for its jar
 # downloads.
-#   git      - core to most workflows / commit tooling
-#   gnupg    - signing commits with the host's GPG keys (see --gpg)
-#   openssh  - SSH git remotes using the host's keys (see --ssh)
-#   ripgrep  - file search
-#   gosu     - clean privilege drop to the host-mapped UID
-#   tini     - PID 1 reaping (claude spawns many child processes)
-#   ca-certs - HTTPS to the API
-#   nodejs   - Node.js 24 LTS from NodeSource (Debian's own nodejs is 18, EOL and with
-#              no Corepack); the runtime for Yarn, since the Node bundled inside the
-#              claude binary is not on PATH for general use. NodeSource bundles Corepack.
-# The key is referenced as an armoured .asc directly in signed-by, so no gnupg/dearmor
-# is needed. Same repo pattern as the Adoptium block in Dockerfile.re. The Corepack
+#   git       - core to most workflows / commit tooling
+#   gnupg     - signing commits with the host's GPG keys (see --gpg)
+#   openssh   - SSH git remotes using the host's keys (see --ssh)
+#   build-ess - a C toolchain (gcc/g++/make) for building/installing native deps
+#   gh        - GitHub CLI, from GitHub's own apt repo for a current version
+#   ripgrep   - file search
+#   gosu      - clean privilege drop to the host-mapped UID
+#   tini      - PID 1 reaping (claude spawns many child processes)
+#   ca-certs  - HTTPS to the API
+#   nodejs    - Node.js 24 LTS from NodeSource (Debian's own nodejs is 18, EOL and with
+#               no Corepack); the runtime for Yarn, since the Node bundled inside the
+#               claude binary is not on PATH for general use. NodeSource bundles Corepack.
+# The NodeSource key is an armoured .asc referenced in signed-by, so no gnupg/dearmor is
+# needed; GitHub's keyring ships already-dearmoured. Same repo pattern as the Adoptium
+# block in Dockerfile.re. glab (the GitLab CLI) is not in Debian and is released on
+# gitlab.com, so it is fetched as a binary in a separate step below. The Corepack
 # Yarn shim is enabled in the same layer so `yarn` resolves to whatever version each
 # project pins via its `packageManager` field (this repo pins Yarn 4.x, checked into
 # .yarn/releases, so it runs offline) instead of a single globally pinned version.
@@ -59,10 +63,18 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         -o /etc/apt/keyrings/nodesource.asc \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_24.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gh \
         git \
         gnupg \
+        libffi-dev \
         openssh-client \
+        pkg-config \
         ripgrep \
         less \
         gosu \
@@ -78,6 +90,18 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv/bin/pip install --no-cache-dir mcp pre-commit \
     && rm -rf /var/lib/apt/lists/*
+
+# glab (GitLab CLI): not in Debian and released on gitlab.com (not GitHub), so resolve the
+# latest tag from the GitLab releases API and install the linux amd64 binary from the
+# matching release download.
+RUN set -eux; \
+    ver="$(wget -qO- 'https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases?per_page=1' \
+           | grep -oP '"tag_name":"v\K[^"]+' | head -1)"; \
+    wget -qO /tmp/glab.tar.gz \
+        "https://gitlab.com/gitlab-org/cli/-/releases/v${ver}/downloads/glab_${ver}_linux_amd64.tar.gz"; \
+    tar -xzf /tmp/glab.tar.gz -C /tmp bin/glab; \
+    install -m 0755 /tmp/bin/glab /usr/local/bin/glab; \
+    rm -rf /tmp/glab.tar.gz /tmp/bin
 
 # PATH puts the venv first so `python3`/`pip` are the venv's; LANG/LC_ALL/LANGUAGE pin
 # the en_GB locale generated above; DISABLE_AUTOUPDATER stops the read-only mounted

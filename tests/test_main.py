@@ -125,6 +125,32 @@ def test_run_uv_env_override_by_pass_env(runner: CliRunner, mocker: MockerFixtur
     assert run.call_args[0][0].env['UV_PROJECT_ENVIRONMENT'] == '/from/host'
 
 
+def test_run_memory_cpus_flags(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--memory', '8g', '--cpus', '4'])
+    spec = run.call_args[0][0]
+    assert spec.memory == '8g'
+    assert spec.cpus == '4'
+
+
+def test_run_memory_cpus_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(memory='4g', cpus='2'))
+    runner.invoke(main, ['run'])
+    spec = run.call_args[0][0]
+    assert spec.memory == '4g'
+    assert spec.cpus == '2'
+
+
+def test_run_forwards_aws_profile_by_default(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    mocker.patch.dict('os.environ', {'AWS_PROFILE': 'work'})
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].env.get('AWS_PROFILE') == 'work'
+
+
 def test_run_env_flag(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())

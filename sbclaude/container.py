@@ -94,6 +94,10 @@ class RunSpec:
     """Environment variables injected into the box."""
     harden: bool = True
     """Whether to apply the container hardening flags."""
+    memory: str | None = None
+    """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
+    cpus: str | None = None
+    """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
     debian_mirror: str | None = None
     """Debian archive mirror for an auto-triggered image build, or ``None`` for the default."""
     extra_args: list[str] = field(default_factory=list)
@@ -216,6 +220,36 @@ def _v(src: Path | str, dst: Path | str | None = None, *, ro: bool = False) -> t
     return ('-v', f'{src}:{dst if dst is not None else src}{":ro" if ro else ""}')
 
 
+def _auto_memory_bytes() -> int | None:
+    # Cap container memory below the host total so the box can never drive the host into
+    # OOM or swap thrashing. Reserve the larger of 2 GiB or an eighth of RAM for the host
+    # and dockerd. Returns None on tiny hosts (let Docker default apply) or if the host
+    # total cannot be determined.
+    try:
+        total = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+    except (AttributeError, OSError, ValueError):
+        return None
+    limit = total - max(2 * 1024 ** 3, total // 8)
+    return limit if limit > 512 * 1024 ** 2 else None
+
+
+def _resource_args(spec: RunSpec) -> list[str]:
+    # Bound the container so it cannot lock up the host. --memory plus an equal
+    # --memory-swap means the box gets a fixed RAM budget and no extra swap, so it is
+    # OOM-killed instead of thrashing host swap; cgroups (the systemd cgroup driver on a
+    # systemd host) enforce this. ``memory='0'`` opts out; an explicit value overrides the
+    # auto cap. CPU is only capped when requested, since saturation slows but never locks.
+    args: list[str] = []
+    memory = spec.memory
+    if memory is None and (auto := _auto_memory_bytes()) is not None:
+        memory = f'{auto}b'
+    if memory and memory != '0':
+        args += ['--memory', memory, '--memory-swap', memory]
+    if spec.cpus:
+        args += ['--cpus', spec.cpus]
+    return args
+
+
 def config_dir(home: Path) -> Path:
     """
     Return claude's config directory, honouring ``CLAUDE_CONFIG_DIR``.
@@ -253,7 +287,7 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     uid, gid, user = os.getuid(), os.getgid(), getpass.getuser()
     image = spec.image or (IMAGE_RE if spec.use_re else IMAGE_BASE)
     tty = ('-i', '-t') if (sys.stdin.isatty() and sys.stdout.isatty()) else ('-i',)
-    hardening = tuple(HARDENING_ARGS) if spec.harden else ()
+    hardening = (*HARDENING_ARGS, *_resource_args(spec)) if spec.harden else ()
     argv = [
         'docker', 'run', '--rm', *tty, '--name', spec.name, *hardening, '--label', f'{LABEL}=1',
         '--label', f'{PROJECT_LABEL}={spec.project}', '--network', spec.network, '-e',

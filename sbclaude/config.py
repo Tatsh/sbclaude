@@ -67,6 +67,10 @@ class Config:
     """Debian archive mirror used when building the images, or ``None`` for the default."""
     harden: bool = True
     """Whether to apply the container hardening flags."""
+    memory: str | None = None
+    """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
+    cpus: str | None = None
+    """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
     manage_uv_env: bool = True
     """Whether to point ``UV_PROJECT_ENVIRONMENT`` at a container-local path by default."""
 
@@ -102,6 +106,8 @@ def load_config(path: Path | None = None) -> Config:
                   network=str(data.get('network', DEFAULT_NETWORK)),
                   debian_mirror=(str(data['debian_mirror']) if data.get('debian_mirror') else None),
                   harden=bool(data.get('harden', True)),
+                  memory=(str(data['memory']) if data.get('memory') is not None else None),
+                  cpus=(str(data['cpus']) if data.get('cpus') is not None else None),
                   manage_uv_env=bool(data.get('manage_uv_env', True)))
 
 

@@ -37,10 +37,10 @@ invoke `sbclaude` — it manages its own images and containers via the Docker SD
 
 There are two images, built on demand:
 
-| Image         | Contents                                                         | Use             |
-| ------------- | ---------------------------------------------------------------- | --------------- |
-| `sbclaude`    | Debian slim + git/ripgrep, runs the host-mounted `claude` binary | everyday coding |
-| `sbclaude-re` | the above **plus** a mobile reverse-engineering toolchain        | APK / native RE |
+| Image         | Contents                                                              | Use             |
+| ------------- | --------------------------------------------------------------------- | --------------- |
+| `sbclaude`    | Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv | everyday coding |
+| `sbclaude-re` | the above **plus** a mobile reverse-engineering toolchain             | APK / native RE |
 
 ## How it works
 
@@ -115,7 +115,9 @@ default_flags = ["--re", "--x11"] # applied to every run
 network = "host"                  # default; "bridge" to isolate the box's network
 # image = "sbclaude-re:latest"       # force an image
 # debian_mirror = "http://ftp.us.debian.org/debian" # apt mirror for image builds
-pass_env = ["AWS_PROFILE", "AWS_REGION"]           # forward these host vars into the box
+# memory = "8g"                      # override the auto host-RAM cap ("0" disables)
+# cpus = "4"                         # cap CPUs (uncapped by default)
+pass_env = ["AWS_REGION"]                          # forward these host vars (AWS_PROFILE is default)
 ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"] # read-only mounts (globs + ~ ok)
 rw = []                                            # the project dir is always rw automatically
 [env] # inject fixed vars (e.g. Amazon Bedrock)
@@ -135,9 +137,10 @@ is writable).
 
 **Environment variables** — inject with the `[env]` table, forward host values by name
 with `pass_env`, or per-run with `-e KEY=VALUE` (precedence: managed defaults < `[env]` <
-`pass_env` < `-e`). This is how you point the box at a different backend such as **Amazon
-Bedrock** (`CLAUDE_CODE_USE_BEDROCK=1` + your `AWS_*` vars; mount `~/.aws` via `ro` if you
-use profiles).
+`pass_env` < `-e`). `AWS_PROFILE` is forwarded by default when set on the host. This is how
+you point the box at a different backend such as **Amazon Bedrock**
+(`CLAUDE_CODE_USE_BEDROCK=1` + your `AWS_*` vars; mount `~/.aws` via `ro` if you use
+profiles).
 
 **uv project environment** — by default the box sets `UV_PROJECT_ENVIRONMENT` to a
 container-local path (`/tmp/sbclaude-uv-<project>`), so `uv sync`/`uv run` build the
@@ -252,9 +255,18 @@ it limits blast radius, it is not a guarantee):
   (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`), a `--pids-limit`, a non-root
   mapped user, and the default seccomp/AppArmor profiles (never disabled). The claude
   process itself ends up with an **empty effective capability set**.
+- **Can't lock the host:** `--pids-limit` stops fork bombs, and `--memory` with an equal
+  `--memory-swap` bounds RAM with no extra swap, so a runaway box is OOM-killed instead of
+  thrashing the host into a freeze. The default cap is derived from host RAM (reserving the
+  larger of 2 GiB or an eighth for the host); set `memory` to override or `"0"` to disable,
+  and `cpus` to cap CPU (uncapped by default — saturation slows but does not lock). These
+  are enforced by **cgroups**, i.e. the systemd cgroup driver on a systemd host — a separate
+  `systemd-run` wrapper is unnecessary (and would not bound the container, which runs under
+  the Docker daemon's cgroup, not the CLI's).
 
-Disable per run with `--no-harden`, globally with `harden = false` in config, and add your
-own Docker flags (e.g. `--memory`, `--cpus`, `--read-only`) via `docker_args = [...]`.
+Disable per run with `--no-harden`, globally with `harden = false` in config (this also
+drops the resource caps), and add your own Docker flags (e.g. `--read-only`) via
+`docker_args = [...]`.
 
 Still: the containerized Claude can run any command and read/write every mounted path
 without asking, with unrestricted network. Keep writable mounts minimal (the config

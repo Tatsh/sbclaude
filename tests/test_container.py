@@ -520,13 +520,70 @@ def test_build_run_argv_no_harden(mocker: MockerFixture, tmp_path: Path) -> None
     assert '--cap-drop' not in argv
 
 
+def test_build_run_argv_memory_explicit(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', memory='8g'))
+    assert argv[argv.index('--memory') + 1] == '8g'
+    assert argv[argv.index('--memory-swap') + 1] == '8g'
+
+
+def test_build_run_argv_memory_disabled(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', memory='0'))
+    assert '--memory' not in argv
+
+
+def test_build_run_argv_memory_auto_from_host(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    # 8 GiB host: reserve max(2 GiB, 1 GiB) = 2 GiB, so the cap is 6 GiB.
+    mocker.patch('sbclaude.container.os.sysconf',
+                 side_effect=lambda name: {
+                     'SC_PAGE_SIZE': 4096,
+                     'SC_PHYS_PAGES': 2097152
+                 }[name])
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n'))
+    assert argv[argv.index('--memory') + 1] == f'{6 * 1024**3}b'
+
+
+def test_build_run_argv_cpus(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', cpus='4'))
+    assert argv[argv.index('--cpus') + 1] == '4'
+
+
+def test_build_run_argv_resource_limits_need_harden(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', memory='8g', cpus='4', harden=False))
+    assert '--memory' not in argv
+    assert '--cpus' not in argv
+
+
 def test_build_run_argv_extra_args(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     project = tmp_path / 'p'
     project.mkdir()
     argv, _ = container.build_run_argv(
-        container.RunSpec(project=project, name='n', extra_args=['--memory', '2g']))
-    idx = argv.index('--memory')
-    assert argv[idx + 1] == '2g'
+        container.RunSpec(project=project,
+                          name='n',
+                          extra_args=['--read-only', '--shm-size', '256m']))
+    idx = argv.index('--shm-size')
+    assert argv[idx + 1] == '256m'
+    assert '--read-only' in argv
     assert argv.index(container.IMAGE_BASE) > idx
