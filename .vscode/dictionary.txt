@@ -74,6 +74,7 @@ gnupghome
 gosu
 gpgconf
 gpgsign
+handoff
 hoverxref
 htmlcov
 idevice
@@ -181,6 +182,7 @@ snapcraft
 soupsieve
 speex
 sphinxcontrib
+statusline
 syft
 sysconf
 tatsh
