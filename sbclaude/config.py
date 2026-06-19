@@ -71,6 +71,8 @@ class Config:
     """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
     cpus: str | None = None
     """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
+    recover: bool = False
+    """Whether to install cc-session-recover (auto-resume) into the project by default."""
     manage_uv_env: bool = True
     """Whether to point ``UV_PROJECT_ENVIRONMENT`` at a container-local path by default."""
 
@@ -108,6 +110,7 @@ def load_config(path: Path | None = None) -> Config:
                   harden=bool(data.get('harden', True)),
                   memory=(str(data['memory']) if data.get('memory') is not None else None),
                   cpus=(str(data['cpus']) if data.get('cpus') is not None else None),
+                  recover=bool(data.get('recover', False)),
                   manage_uv_env=bool(data.get('manage_uv_env', True)))
 
 

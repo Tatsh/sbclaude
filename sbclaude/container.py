@@ -98,6 +98,8 @@ class RunSpec:
     """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
     cpus: str | None = None
     """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
+    recover: bool = False
+    """Whether to install cc-session-recover (auto-resume) into the project on start."""
     debian_mirror: str | None = None
     """Debian archive mirror for an auto-triggered image build, or ``None`` for the default."""
     extra_args: list[str] = field(default_factory=list)
@@ -303,6 +305,9 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     # The legacy top-level config/auth file (only when it still lives in $HOME).
     if (home / '.claude.json').is_file():
         argv += _v(home / '.claude.json')
+    # The entrypoint runs the cc-session-recover installer only when this is set.
+    if spec.recover:
+        argv += ['-e', 'SBCLAUDE_RECOVER=1']
     for key, value in spec.env.items():
         argv += ['-e', f'{key}={value}']
     cleanup: Path | None = None

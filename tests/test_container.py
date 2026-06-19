@@ -574,6 +574,24 @@ def test_build_run_argv_resource_limits_need_harden(mocker: MockerFixture, tmp_p
     assert '--cpus' not in argv
 
 
+def test_build_run_argv_recover(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', recover=True))
+    assert 'SBCLAUDE_RECOVER=1' in argv
+
+
+def test_build_run_argv_no_recover_by_default(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n'))
+    assert 'SBCLAUDE_RECOVER=1' not in argv
+
+
 def test_build_run_argv_extra_args(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)

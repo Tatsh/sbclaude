@@ -151,6 +151,35 @@ def test_run_forwards_aws_profile_by_default(runner: CliRunner, mocker: MockerFi
     assert run.call_args[0][0].env.get('AWS_PROFILE') == 'work'
 
 
+def test_run_recover_off_by_default(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].recover is False
+
+
+def test_run_session_recover_flag(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--session-recover'])
+    assert run.call_args[0][0].recover is True
+
+
+def test_run_recover_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(recover=True))
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].recover is True
+
+
+def test_run_recover_from_default_flags(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config',
+                 return_value=Config(default_flags=['--session-recover']))
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].recover is True
+
+
 def test_run_env_flag(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())

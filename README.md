@@ -92,18 +92,19 @@ more than one is running).
 
 ### `run` flags
 
-| Flag             | Effect                                                                         |
-| ---------------- | ------------------------------------------------------------------------------ |
-| `--re`           | use `sbclaude-re` and enable `--ghidra` + `--android`                          |
-| `--ghidra`       | mount host Ghidra (`/usr/share/ghidra`) read-only                              |
-| `--android`      | mount Android SDK + `~/.android` + `/dev/kvm` (adb/emulator)                   |
-| `--usb`          | expose `/dev/bus/usb` for adb over USB                                         |
-| `--ios`          | mount the host `usbmuxd` socket so frida reaches an iOS device over USB        |
-| `--x11`          | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator) |
-| `--ssh`          | mount the host `~/.ssh` read-only for SSH git remotes                          |
-| `--gpg`          | mount the host GnuPG home + agent socket for signing commits                   |
-| `--net bridge`   | isolate the box's network (default is `host` — `localhost` = your host)        |
-| `-r/-w/-p/-n/-i` | extra ro/rw mount, project, container name, image override                     |
+| Flag                | Effect                                                                         |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `--re`              | use `sbclaude-re` and enable `--ghidra` + `--android`                          |
+| `--ghidra`          | mount host Ghidra (`/usr/share/ghidra`) read-only                              |
+| `--android`         | mount Android SDK + `~/.android` + `/dev/kvm` (adb/emulator)                   |
+| `--usb`             | expose `/dev/bus/usb` for adb over USB                                         |
+| `--ios`             | mount the host `usbmuxd` socket so frida reaches an iOS device over USB        |
+| `--x11`             | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator) |
+| `--ssh`             | mount the host `~/.ssh` read-only for SSH git remotes                          |
+| `--gpg`             | mount the host GnuPG home + agent socket for signing commits                   |
+| `--session-recover` | install `cc-session-recover` (auto-resume) into the project on start           |
+| `--net bridge`      | isolate the box's network (default is `host` — `localhost` = your host)        |
+| `-r/-w/-p/-n/-i`    | extra ro/rw mount, project, container name, image override                     |
 
 ## Configuration
 
@@ -117,6 +118,7 @@ network = "host"                  # default; "bridge" to isolate the box's netwo
 # debian_mirror = "http://ftp.us.debian.org/debian" # apt mirror for image builds
 # memory = "8g"                      # override the auto host-RAM cap ("0" disables)
 # cpus = "4"                         # cap CPUs (uncapped by default)
+# recover = true                     # install cc-session-recover into every project (off by default)
 pass_env = ["AWS_REGION"]                          # forward these host vars (AWS_PROFILE is default)
 ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"] # read-only mounts (globs + ~ ok)
 rw = []                                            # the project dir is always rw automatically
@@ -156,6 +158,26 @@ box's Linux is usually reusable on a Linux host anyway, so it is left untouched.
 **Alternate config dir** — if `CLAUDE_CONFIG_DIR` is set on the host, sbclaude mounts that
 directory (its `.claude.json`, `settings.json`, history) and points claude at it inside the
 box instead of `~/.claude`.
+
+## Session recovery
+
+[cc-session-recover](https://github.com/softcane/cc-session-recover) lets Claude Code pick a
+long-running task back up after a quota or rate-limit pause. It is **off by default** — enable
+it per run with `--session-recover`, or for every run with `recover = true` in the config. When
+enabled, the container entrypoint runs the tool's `install-into-project.sh` against the project
+before launching claude, which sets up its `SessionStart` and `Stop` hooks and a `HANDOFF.md`.
+
+The tool is **vendored into the image as a git clone** (not the npm package) at
+`/opt/cc-session-recover`, with [PR #2](https://github.com/softcane/cc-session-recover/pull/2)
+(safer watcher argument handling and the opt-in `CC_REMIND_MODE` prompt-injection limit) applied
+on top. Two further patches keep the installer tidy: it no longer copies `settings.example.json`
+into the project, and its own `.gitignore` handling is disabled. The installer writes into the
+project's `.claude/` (hooks and `settings.local.json`, merged with `jq`) and a `HANDOFF.md`;
+because the project is bind-mounted read-write, **those files land in your real repository and
+persist**, which is why this is opt-in. Afterwards the entrypoint appends the recovery artifacts
+(`HANDOFF.md`, `auto-continue.md`, `standing-instructions.md`, `statusline-quota-cache.sh`, and
+the three hook scripts) to the project's `.gitignore`, each only when absent. If the install
+fails, the box aborts rather than starting a session that silently lacks recovery.
 
 ## MCP servers
 

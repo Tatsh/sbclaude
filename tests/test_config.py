@@ -55,6 +55,18 @@ def test_load_config_memory_cpus(tmp_path: Path) -> None:
     assert cfg.cpus == '4'
 
 
+def test_load_config_recover_default_false(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('network = "host"\n')
+    assert load_config(path).recover is False
+
+
+def test_load_config_recover_true(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('recover = true\n')
+    assert load_config(path).recover is True
+
+
 def test_expand_paths_glob(tmp_path: Path) -> None:
     (tmp_path / 'dev1').mkdir()
     (tmp_path / 'dev2').mkdir()

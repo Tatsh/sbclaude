@@ -33,6 +33,8 @@ ARG DEBIAN_MIRROR=""
 #   openssh   - SSH git remotes using the host's keys (see --ssh)
 #   build-ess - a C toolchain (gcc/g++/make) for building/installing native deps
 #   gh        - GitHub CLI, from GitHub's own apt repo for a current version
+#   jq        - JSON processor (cc-session-recover's installer merges settings.local.json
+#               with it; its optional quota watcher needs it too)
 #   ripgrep   - file search
 #   gosu      - clean privilege drop to the host-mapped UID
 #   tini      - PID 1 reaping (claude spawns many child processes)
@@ -72,6 +74,7 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         gh \
         git \
         gnupg \
+        jq \
         libffi-dev \
         openssh-client \
         pkg-config \
@@ -102,6 +105,27 @@ RUN set -eux; \
     tar -xzf /tmp/glab.tar.gz -C /tmp bin/glab; \
     install -m 0755 /tmp/bin/glab /usr/local/bin/glab; \
     rm -rf /tmp/glab.tar.gz /tmp/bin
+
+# cc-session-recover: opt-in auto-resume helper that lets Claude Code pick a long task back
+# up after a quota pause. Vendored as a git clone (not the npm package) with PR #2 applied
+# on top (safer watcher argument handling + the configurable CC_REMIND_MODE prompt injection);
+# the patch is computed against its merge base so it applies cleanly onto main. The
+# entrypoint runs scripts/install-into-project.sh from here when --session-recover is given
+# (it stays inert otherwise). The .git directory is dropped afterwards to slim the image.
+# The two sed commands patch the installer before it is ever run: the first points its
+# GITIGNORE variable at /dev/null so it never creates or appends to the project's .gitignore
+# (every touch/grep/append in that block then no-ops; the entrypoint manages .gitignore
+# itself instead); the second drops the line that copies settings.example.json into the
+# project (the hook merge still reads the template from this vendored tree, so it keeps
+# working). Both keep clutter out of the user's repository.
+# https://github.com/softcane/cc-session-recover/pull/2
+RUN git clone https://github.com/softcane/cc-session-recover.git /opt/cc-session-recover \
+    && cd /opt/cc-session-recover \
+    && git fetch origin pull/2/head:pr2 \
+    && git diff main...pr2 | git apply --3way \
+    && sed -i 's#^GITIGNORE=.*#GITIGNORE=/dev/null#' scripts/install-into-project.sh \
+    && sed -i '/settings\.example\.json" "\$TARGET/d' scripts/install-into-project.sh \
+    && rm -rf .git
 
 # PATH puts the venv first so `python3`/`pip` are the venv's; LANG/LC_ALL/LANGUAGE pin
 # the en_GB locale generated above; DISABLE_AUTOUPDATER stops the read-only mounted

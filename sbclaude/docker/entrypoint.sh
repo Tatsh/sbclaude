@@ -61,6 +61,55 @@ fi
 # keeping the image's toolchain PATH after it.
 export PATH="$HOST_HOME/.local/bin:$PATH"
 
+# Set up cc-session-recover in the project (auto-resume across quota pauses) when
+# SBCLAUDE_RECOVER=1 (sbclaude sets this for --session-recover). The installer is the
+# vendored clone at /opt/cc-session-recover; it copies its hook templates relative to its
+# own location and merges them into the project's .claude/settings.local.json. It runs as
+# the mapped user so the files it writes into the project (.claude/hooks,
+# .claude/settings.local.json, HANDOFF.md) are owned correctly. A failed install aborts the
+# session: recovery was explicitly requested, so starting without it would silently drop it.
+RECOVER_INSTALLER=/opt/cc-session-recover/scripts/install-into-project.sh
+# The recovery artifacts to keep out of the project's git history. The installer's own
+# .gitignore handling is patched out in the image; we append exactly these entries instead
+# (each only when absent), so the set is explicit and stable.
+RECOVER_GITIGNORE_ENTRIES=(
+    /HANDOFF.md
+    /.claude/auto-continue.md
+    /.claude/standing-instructions.md
+    /.claude/statusline-quota-cache.sh
+    /.claude/hooks/inject-standing-instructions.sh
+    /.claude/hooks/remind-on-prompt.sh
+    /.claude/hooks/log-stop-failure.sh
+)
+if [ "${SBCLAUDE_RECOVER:-0}" = "1" ]; then
+    if [ ! -f "$RECOVER_INSTALLER" ]; then
+        echo "sbclaude: cc-session-recover installer not found at $RECOVER_INSTALLER; aborting." >&2
+        exit 1
+    fi
+    if ! gosu "$HOST_UID:$HOST_GID" \
+        env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
+        bash "$RECOVER_INSTALLER" "$PWD"; then
+        echo "sbclaude: cc-session-recover install failed; aborting (no session started)." >&2
+        exit 1
+    fi
+    # Append each recovery artifact to the project's .gitignore when missing (creating the
+    # file if needed). The array is expanded into the inner shell's positional parameters.
+    # Runs as the mapped user for correct ownership; best-effort, so a write failure here
+    # does not abort the now-installed session.
+    # shellcheck disable=SC2016  # $1/$@/$entry intentionally expand in the gosu'd shell.
+    gosu "$HOST_UID:$HOST_GID" \
+        env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
+        bash -c '
+            target=$1
+            shift
+            cd "$target" 2>/dev/null || exit 0
+            for entry in "$@"; do
+                grep -qxF "$entry" .gitignore 2>/dev/null || printf "%s\n" "$entry" >> .gitignore
+            done
+            exit 0
+        ' _ "$PWD" "${RECOVER_GITIGNORE_ENTRIES[@]}"
+fi
+
 # Drop to the mapped user with a correct HOME/USER/PATH environment and exec claude.
 exec gosu "$HOST_UID:$HOST_GID" \
     env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \

@@ -21,13 +21,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   GnuPG home and agent socket for SSH git remotes and signed commits.
 - The box now points `UV_PROJECT_ENVIRONMENT` at a container-local path by default so `uv` does
   not write a `.venv` into the bind-mounted project; opt out with the `manage_uv_env` config key.
+- `--session-recover` flag on `run`, plus a `recover` config key (off by default), to install
+  cc-session-recover into the project on session start so a crashed session auto-resumes; the
+  recovery artifacts are added to the project's `.gitignore`.
 
 ### Changed
 
 - `stop` with no arguments now stops every box for the current project, and `shell` selects the
   project's box automatically, asking for `-n NAME` when more than one is running.
-- The base image now ships Node.js 24 with Yarn (via Corepack), the MCP SDK in `/opt/venv`, and
-  `gnupg` and `openssh-client`.
+- The base image now ships Node.js 24 with Yarn (via Corepack), the MCP SDK in `/opt/venv`,
+  `gnupg`, `openssh-client`, and `jq`.
 
 ### Fixed
 

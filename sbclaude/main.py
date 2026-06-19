@@ -9,7 +9,7 @@ from bascom import setup_logging
 import click
 
 from . import container
-from .config import config_path, expand_paths, load_config
+from .config import Config, config_path, expand_paths, load_config
 
 __all__ = ('main',)
 
@@ -78,14 +78,20 @@ def main(ctx: click.Context) -> None:
               'no_harden',
               is_flag=True,
               help='Disable the container hardening flags (cap-drop, no-new-privileges, ...).')
+@click.option('--session-recover',
+              'session_recover',
+              is_flag=True,
+              help='Install cc-session-recover (auto-resume) into the project on start.')
 @click.option('-d', '--debug', is_flag=True, help='Enable debug level logging.')
 @click.argument('claude_args', nargs=-1, type=click.UNPROCESSED)
-def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ...],
-        env_extra: tuple[str, ...], name: str | None, image: str | None, network: str | None,
-        debian_mirror: str | None, memory: str | None, cpus: str | None, claude_args: tuple[str,
-                                                                                            ...], *,
-        use_re: bool, use_ghidra: bool, use_android: bool, use_usb: bool, use_ios: bool,
-        use_x11: bool, use_ssh: bool, use_gpg: bool, no_harden: bool, debug: bool) -> None:
+def run(project: Path | None, rw_extra: tuple[str,
+                                              ...], ro_extra: tuple[str,
+                                                                    ...], env_extra: tuple[str,
+                                                                                           ...],
+        name: str | None, image: str | None, network: str | None, debian_mirror: str | None,
+        memory: str | None, cpus: str | None, claude_args: tuple[str, ...], *, use_re: bool,
+        use_ghidra: bool, use_android: bool, use_usb: bool, use_ios: bool, use_x11: bool,
+        use_ssh: bool, use_gpg: bool, no_harden: bool, session_recover: bool, debug: bool) -> None:
     """Launch claude in a fresh container. Args after ``--`` pass through to claude."""  # noqa: DOC501
     setup_logging(debug=debug, loggers={'sbclaude': {}})
     cfg = load_config()
@@ -101,21 +107,9 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
     debian_mirror = debian_mirror or cfg.debian_mirror
     memory = memory or cfg.memory
     cpus = cpus or cfg.cpus
+    # --session-recover (or the config recover key / default_flags) enables it; off otherwise.
+    session_recover = session_recover or cfg.recover or '--session-recover' in flags
     proj = (project or Path.cwd()).resolve()
-    # Env precedence (lowest to highest): the managed UV_PROJECT_ENVIRONMENT default, the
-    # config [env] table, host values for pass_env names, then -e flags. Seeding the uv
-    # default first lets the user override or unset it through any of the later layers.
-    env: dict[str, str] = {}
-    if cfg.manage_uv_env:
-        env['UV_PROJECT_ENVIRONMENT'] = container.uv_project_environment(proj)
-    env.update(cfg.env)
-    env.update({k: os.environ[k] for k in (*DEFAULT_PASS_ENV, *cfg.pass_env) if k in os.environ})
-    for item in env_extra:
-        key, sep, value = item.partition('=')
-        if not sep:
-            msg = f'expected KEY=VALUE, got {item!r}'
-            raise click.BadParameter(msg)
-        env[key] = value
     spec = container.RunSpec(project=proj,
                              name=name or container.unique_name(proj),
                              network=network or cfg.network,
@@ -130,10 +124,11 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
                              use_gpg=use_gpg,
                              ro=[*expand_paths(cfg.ro), *expand_paths(ro_extra)],
                              rw=[*expand_paths(cfg.rw), *expand_paths(rw_extra)],
-                             env=env,
+                             env=_resolve_env(cfg, proj, env_extra),
                              harden=cfg.harden and not no_harden,
                              memory=memory,
                              cpus=cpus,
+                             recover=session_recover,
                              debian_mirror=debian_mirror,
                              extra_args=cfg.docker_args,
                              claude_args=claude_args)
@@ -141,6 +136,46 @@ def run(project: Path | None, rw_extra: tuple[str, ...], ro_extra: tuple[str, ..
         raise SystemExit(container.run(spec))
     except FileNotFoundError as e:
         raise click.ClickException(str(e)) from e
+
+
+def _resolve_env(cfg: Config, proj: Path, env_extra: tuple[str, ...]) -> dict[str, str]:
+    """
+    Resolve the box's environment from config layers and ``-e`` overrides.
+
+    Precedence, lowest to highest: the managed ``UV_PROJECT_ENVIRONMENT`` default, the
+    config ``[env]`` table, host values for ``pass_env`` names, then ``-e`` flags.
+
+    Parameters
+    ----------
+    cfg : Config
+        The loaded configuration.
+    proj : Path
+        The resolved project directory.
+    env_extra : tuple[str, ...]
+        ``KEY=VALUE`` strings from ``-e`` flags.
+
+    Returns
+    -------
+    dict[str, str]
+        The merged environment to inject into the box.
+
+    Raises
+    ------
+    click.BadParameter
+        If a ``-e`` value is not ``KEY=VALUE``.
+    """
+    env: dict[str, str] = {}
+    if cfg.manage_uv_env:
+        env['UV_PROJECT_ENVIRONMENT'] = container.uv_project_environment(proj)
+    env.update(cfg.env)
+    env.update({k: os.environ[k] for k in (*DEFAULT_PASS_ENV, *cfg.pass_env) if k in os.environ})
+    for item in env_extra:
+        key, sep, value = item.partition('=')
+        if not sep:
+            msg = f'expected KEY=VALUE, got {item!r}'
+            raise click.BadParameter(msg)
+        env[key] = value
+    return env
 
 
 @main.command(name='ls')
