@@ -32,11 +32,66 @@ def test_run_flags_and_passthrough(runner: CliRunner, mocker: MockerFixture) -> 
     assert spec.claude_args == ('--version',)
 
 
-def test_run_config_default_flags(runner: CliRunner, mocker: MockerFixture) -> None:
+def test_run_config_x11(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
-    mocker.patch('sbclaude.main.load_config', return_value=Config(default_flags=['--x11']))
+    mocker.patch('sbclaude.main.load_config', return_value=Config(x11=True))
     runner.invoke(main, ['run'])
     assert run.call_args[0][0].use_x11
+
+
+def test_run_re_from_config_implies_ghidra_android(runner: CliRunner,
+                                                   mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(re=True))
+    runner.invoke(main, ['run'])
+    spec = run.call_args[0][0]
+    assert spec.use_re
+    assert spec.use_ghidra
+    assert spec.use_android
+
+
+def test_run_ghidra_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(ghidra=True))
+    runner.invoke(main, ['run'])
+    spec = run.call_args[0][0]
+    assert spec.use_ghidra
+    assert not spec.use_re
+    assert not spec.use_android
+
+
+def test_run_android_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(android=True))
+    runner.invoke(main, ['run'])
+    spec = run.call_args[0][0]
+    assert spec.use_android
+    assert not spec.use_re
+    assert not spec.use_ghidra
+
+
+def test_run_usb_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(usb=True))
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].use_usb
+
+
+def test_run_usb_flag(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--usb'])
+    assert run.call_args[0][0].use_usb
+
+
+def test_run_ghidra_android_flags(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--ghidra', '--android'])
+    spec = run.call_args[0][0]
+    assert spec.use_ghidra
+    assert spec.use_android
+    assert not spec.use_re
 
 
 def test_run_ios_flag(runner: CliRunner, mocker: MockerFixture) -> None:
@@ -46,9 +101,9 @@ def test_run_ios_flag(runner: CliRunner, mocker: MockerFixture) -> None:
     assert run.call_args[0][0].use_ios
 
 
-def test_run_ios_config_default_flag(runner: CliRunner, mocker: MockerFixture) -> None:
+def test_run_ios_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
-    mocker.patch('sbclaude.main.load_config', return_value=Config(default_flags=['--ios']))
+    mocker.patch('sbclaude.main.load_config', return_value=Config(ios=True))
     runner.invoke(main, ['run'])
     assert run.call_args[0][0].use_ios
 
@@ -62,9 +117,9 @@ def test_run_ssh_gpg_flags(runner: CliRunner, mocker: MockerFixture) -> None:
     assert spec.use_gpg
 
 
-def test_run_ssh_gpg_config_default_flags(runner: CliRunner, mocker: MockerFixture) -> None:
+def test_run_ssh_gpg_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
-    mocker.patch('sbclaude.main.load_config', return_value=Config(default_flags=['--ssh', '--gpg']))
+    mocker.patch('sbclaude.main.load_config', return_value=Config(ssh=True, gpg=True))
     runner.invoke(main, ['run'])
     spec = run.call_args[0][0]
     assert spec.use_ssh
@@ -172,14 +227,6 @@ def test_run_recover_from_config(runner: CliRunner, mocker: MockerFixture) -> No
     assert run.call_args[0][0].recover is True
 
 
-def test_run_recover_from_default_flags(runner: CliRunner, mocker: MockerFixture) -> None:
-    run = mocker.patch('sbclaude.main.container.run', return_value=0)
-    mocker.patch('sbclaude.main.load_config',
-                 return_value=Config(default_flags=['--session-recover']))
-    runner.invoke(main, ['run'])
-    assert run.call_args[0][0].recover is True
-
-
 def test_run_env_flag(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())
@@ -283,13 +330,13 @@ def test_shell_default_multiple(runner: CliRunner, mocker: MockerFixture) -> Non
 def test_build(runner: CliRunner, mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.main.load_config', return_value=Config())
     mocker.patch('sbclaude.main.container.build_images', return_value=iter(['line1', 'line2']))
-    assert 'line1' in runner.invoke(main, ['build', '--no-re']).output
+    assert 'line1' in runner.invoke(main, ['build']).output
 
 
 def test_build_debian_mirror(runner: CliRunner, mocker: MockerFixture) -> None:
     build = mocker.patch('sbclaude.main.container.build_images', return_value=iter([]))
     mocker.patch('sbclaude.main.load_config', return_value=Config())
-    runner.invoke(main, ['build', '--no-re', '--debian-mirror', 'http://ftp.us.debian.org/debian'])
+    runner.invoke(main, ['build', '--debian-mirror', 'http://ftp.us.debian.org/debian'])
     assert build.call_args.kwargs['debian_mirror'] == 'http://ftp.us.debian.org/debian'
 
 
@@ -298,7 +345,7 @@ def test_config_cmd(runner: CliRunner) -> None:
 
 
 def test_delete_image(runner: CliRunner, mocker: MockerFixture) -> None:
-    mocker.patch('sbclaude.main.container.delete_images', return_value=['sbclaude-re:latest'])
+    mocker.patch('sbclaude.main.container.delete_images', return_value=['sbclaude:latest'])
     assert 'Deleted' in runner.invoke(main, ['delete-image']).output
 
 

@@ -33,14 +33,13 @@
 `sbclaude` runs **Claude Code** inside a throwaway Docker container with the bash sandbox
 and permission prompts **disabled**, against a configurable set of host bind mounts. The
 container stores nothing of its own (`--rm`); everything lives on the host. You only ever
-invoke `sbclaude` — it manages its own images and containers via the Docker SDK.
+invoke `sbclaude` — it manages its own image and containers via the Docker SDK.
 
-There are two images, built on demand:
-
-| Image         | Contents                                                              | Use             |
-| ------------- | --------------------------------------------------------------------- | --------------- |
-| `sbclaude`    | Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv | everyday coding |
-| `sbclaude-re` | the above **plus** a mobile reverse-engineering toolchain             | APK / native RE |
+There is a single image, `sbclaude`, built on demand. It bundles everyday coding tools
+(Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv, jq), Qt 6
+development (`qt6-base-dev` plus ninja), and a mobile reverse-engineering toolchain (a JDK,
+frida, mitmproxy, dex2jar, baksmali/smali, and launchers for the host-mounted Ghidra,
+Android SDK, jadx, and apktool).
 
 ## How it works
 
@@ -57,14 +56,14 @@ There are two images, built on demand:
   refuses root), and a **patched copy** of your `settings.json` is mounted over the
   in-container one with `sandbox.enabled=false`, `skipDangerousModePermissionPrompt=true`
   (no bypass dialog) and `tui="fullscreen"`. **Your real settings file is never modified.**
-- Images **auto-build on first use** and **rebuild automatically** when the packaged
-  Dockerfiles/entrypoint change (tracked via a content-hash label).
+- The image **auto-builds on first use** and **rebuilds automatically** when the packaged
+  Dockerfile/entrypoint change (tracked via a content-hash label).
 
 ## Install
 
 ```sh
 uv tool install .         # or: pipx install .
-# images build themselves on first `sbclaude run`; or pre-build:
+# the image builds itself on first `sbclaude run`; or pre-build:
 sbclaude build
 ```
 
@@ -74,13 +73,13 @@ sbclaude build
 sbclaude                          # run claude; cwd is the project (writable)
 sbclaude run -p ~/dev/foo         # explicit project dir (writable, becomes workdir)
 sbclaude run -r /data -w ~/scratch   # extra read-only / read-write mounts
-sbclaude run --re --x11           # RE image + Ghidra/Android tools + GUI passthrough
+sbclaude run --re --x11           # Ghidra/Android mounts + GUI passthrough
 sbclaude run -- --version         # everything after -- goes to claude
 sbclaude ls                       # list running sbclaude containers
 sbclaude stop [--all]             # stop this project's boxes (or all with --all)
 sbclaude shell                    # root debug shell in this project's box
-sbclaude build [--no-re] [--no-cache]   # (re)build the images
-sbclaude delete-image             # remove the sbclaude images
+sbclaude build [--no-cache]       # (re)build the image
+sbclaude delete-image             # remove the sbclaude image
 sbclaude config                   # show the config file path
 ```
 
@@ -94,7 +93,7 @@ more than one is running).
 
 | Flag                | Effect                                                                         |
 | ------------------- | ------------------------------------------------------------------------------ |
-| `--re`              | use `sbclaude-re` and enable `--ghidra` + `--android`                          |
+| `--re`              | enable `--ghidra` + `--android` together                                       |
 | `--ghidra`          | mount host Ghidra (`/usr/share/ghidra`) read-only                              |
 | `--android`         | mount Android SDK + `~/.android` + `/dev/kvm` (adb/emulator)                   |
 | `--usb`             | expose `/dev/bus/usb` for adb over USB                                         |
@@ -108,28 +107,38 @@ more than one is running).
 
 ## Configuration
 
-TOML at `~/.config/sbclaude/config.toml` (path from `platformdirs`; override with
-`$CLAUDE_BOX_CONFIG`). All keys optional:
+All options live under a `[tool.sbclaude]` table. They are read from the global file at
+`~/.config/sbclaude/config.toml` (path from `platformdirs`) and, for `run`, overlaid with the
+target project's `pyproject.toml` `[tool.sbclaude]` table — project values win, so a repo can
+pin its own defaults. All keys optional:
 
 ```toml
-default_flags = ["--re", "--x11"] # applied to every run
-network = "host"                  # default; "bridge" to isolate the box's network
-# image = "sbclaude-re:latest"       # force an image
+[tool.sbclaude]
+gpg = true       # mount the GnuPG home + agent for signing
+network = "host" # default; "bridge" to isolate the box's network
+re = true        # enable the Ghidra + Android mounts together
+ssh = true       # mount ~/.ssh read-only for SSH git remotes
+x11 = true       # forward X11 for GUI apps
+# image = "custom:latest"         # force a different image
 # debian_mirror = "http://ftp.us.debian.org/debian" # apt mirror for image builds
-# memory = "8g"                      # override the auto host-RAM cap ("0" disables)
-# cpus = "4"                         # cap CPUs (uncapped by default)
-# recover = true                     # install cc-session-recover into every project (off by default)
-pass_env = ["AWS_REGION"]                          # forward these host vars (AWS_PROFILE is default)
+# memory = "8g"                   # override the auto host-RAM cap ("0" disables)
+# cpus = "4"                      # cap CPUs (uncapped by default)
+# recover = true                  # install cc-session-recover into every project (off by default)
+pass_env = ["AWS_REGION"]                          # forward host vars (AWS_PROFILE is default)
 ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"] # read-only mounts (globs + ~ ok)
 rw = []                                            # the project dir is always rw automatically
-[env] # inject fixed vars (e.g. Amazon Bedrock)
+
+[tool.sbclaude.env] # inject fixed vars (e.g. Amazon Bedrock)
 CLAUDE_CODE_USE_BEDROCK = "1"
 ```
 
+The toggle keys `re`, `ghidra`, `android`, `usb`, `ios`, `x11`, `ssh`, and `gpg` mirror the
+matching `run` flags and default to `false`; setting one is the same as always passing that
+flag.
+
 **Debian mirror** — when `deb.debian.org` is slow, point image builds at a faster archive
-mirror with `debian_mirror` (or `--debian-mirror` on `build`/`run`). Only the base image's
-main archive URI is rewritten; `debian-security` keeps pointing at `deb.debian.org`. The RE
-image inherits the rewritten sources, so a rebuild is only needed if the image is stale.
+mirror with `debian_mirror` (or `--debian-mirror` on `build`/`run`). Only the image's main
+archive URI is rewritten; `debian-security` keeps pointing at `deb.debian.org`.
 
 `ro`/`rw` accept **globs** (`~/dev*` → every matching dir) and `~`; non-matching or
 missing paths are dropped. Every path is mounted at its real absolute path, so a host
@@ -137,9 +146,9 @@ path you paste into a prompt resolves inside the box. The project (cwd or `-p`) 
 read-write and overlays any read-only parent (e.g. `~/dev` ro + `~/dev/proj` rw → `proj`
 is writable).
 
-**Environment variables** — inject with the `[env]` table, forward host values by name
-with `pass_env`, or per-run with `-e KEY=VALUE` (precedence: managed defaults < `[env]` <
-`pass_env` < `-e`). `AWS_PROFILE` is forwarded by default when set on the host. This is how
+**Environment variables** — inject with the `[tool.sbclaude.env]` table, forward host values
+by name with `pass_env`, or per-run with `-e KEY=VALUE` (precedence: managed defaults <
+`[tool.sbclaude.env]` < `pass_env` < `-e`). `AWS_PROFILE` is forwarded by default. This is how
 you point the box at a different backend such as **Amazon Bedrock**
 (`CLAUDE_CODE_USE_BEDROCK=1` + your `AWS_*` vars; mount `~/.aws` via `ro` if you use
 profiles).
@@ -202,7 +211,7 @@ want to isolate it.
 
 Pushing over SSH and signing commits need the host's private keys, which are **not** mounted
 by default (the box is a fully-autonomous, no-prompt agent — see [Hardening](#hardening)).
-Opt in per run, or globally with `default_flags = ["--ssh", "--gpg"]`:
+Opt in per run, or globally with `ssh = true` and `gpg = true` under `[tool.sbclaude]`:
 
 - `--ssh` bind-mounts `~/.ssh` **read-only**, so SSH remotes authenticate with the host's
   keys and `known_hosts`. Read-only means newly-learnt host keys are not written back.

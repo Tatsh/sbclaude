@@ -24,13 +24,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `--session-recover` flag on `run`, plus a `recover` config key (off by default), to install
   cc-session-recover into the project on session start so a crashed session auto-resumes; the
   recovery artifacts are added to the project's `.gitignore`.
+- Per-project configuration: the global `~/.config/sbclaude/config.toml` is now overlaid by the
+  target project's `pyproject.toml` `[tool.sbclaude]` table, with project values winning (the
+  `env` tables are merged key by key).
+- The image now ships the Qt 6 development packages (`qt6-base-dev`, `qt6-base-dev-tools`) and
+  `ninja-build`.
 
 ### Changed
 
+- **Breaking:** configuration now lives under a `[tool.sbclaude]` table instead of top-level keys,
+  and `default_flags` is removed in favour of individual boolean keys (`re`, `ghidra`, `android`,
+  `usb`, `ios`, `x11`, `ssh`, and `gpg`).
+- **Breaking:** `--re` no longer selects a separate image; it now enables the `--ghidra` and
+  `--android` host mounts together. The reverse-engineering toolchain is part of the single
+  `sbclaude` image.
 - `stop` with no arguments now stops every box for the current project, and `shell` selects the
   project's box automatically, asking for `-n NAME` when more than one is running.
 - The base image now ships Node.js 24 with Yarn (via Corepack), the MCP SDK in `/opt/venv`,
   `gnupg`, `openssh-client`, and `jq`.
+
+### Removed
+
+- **Breaking:** the separate `sbclaude-re` image, now merged into the single `sbclaude` image.
+- **Breaking:** the `--no-re` flag on `build`, which is no longer meaningful with a single image.
 
 ### Fixed
 

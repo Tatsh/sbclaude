@@ -27,12 +27,11 @@ import docker
 import docker.errors
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Iterator
 
-__all__ = ('IMAGE_BASE', 'IMAGE_RE', 'LABEL', 'RunSpec', 'build_images', 'config_dir',
-           'default_name', 'delete_images', 'ensure_image', 'image_exists', 'image_up_to_date',
-           'list_managed', 'project_containers', 'run', 'shell', 'stop', 'unique_name',
-           'uv_project_environment')
+__all__ = ('IMAGE_BASE', 'LABEL', 'RunSpec', 'build_images', 'config_dir', 'default_name',
+           'delete_images', 'ensure_image', 'image_exists', 'image_up_to_date', 'list_managed',
+           'project_containers', 'run', 'shell', 'stop', 'unique_name', 'uv_project_environment')
 
 LABEL = 'sbclaude.managed'
 """Docker label marking a container as sbclaude-managed."""
@@ -41,9 +40,7 @@ PROJECT_LABEL = 'sbclaude.project'
 HASH_LABEL = 'sbclaude.context_hash'
 """Docker label storing the build context hash for staleness checks."""
 IMAGE_BASE = 'sbclaude:latest'
-"""Tag of the everyday coding image."""
-IMAGE_RE = 'sbclaude-re:latest'
-"""Tag of the reverse-engineering image."""
+"""Tag of the sbclaude image."""
 HARDENING_ARGS = ('--security-opt', 'no-new-privileges', '--cap-drop', 'ALL', '--cap-add', 'CHOWN',
                   '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER', '--cap-add', 'SETUID',
                   '--cap-add', 'SETGID', '--pids-limit', '4096')
@@ -71,7 +68,7 @@ class RunSpec:
     image: str | None = None
     """Image override, or ``None`` to auto-select."""
     use_re: bool = False
-    """Whether to use the reverse-engineering image and tools."""
+    """Whether to enable the reverse-engineering host mounts (Ghidra and Android together)."""
     use_ghidra: bool = False
     """Whether to mount the host Ghidra installation read-only."""
     use_android: bool = False
@@ -287,7 +284,7 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     home = Path.home()
     cfg_dir = config_dir(home)
     uid, gid, user = os.getuid(), os.getgid(), getpass.getuser()
-    image = spec.image or (IMAGE_RE if spec.use_re else IMAGE_BASE)
+    image = spec.image or IMAGE_BASE
     tty = ('-i', '-t') if (sys.stdin.isatty() and sys.stdout.isatty()) else ('-i',)
     hardening = (*HARDENING_ARGS, *_resource_args(spec)) if spec.harden else ()
     argv = [
@@ -486,8 +483,8 @@ def run(spec: RunSpec) -> int:
     int
         The container's exit code.
     """
-    image = spec.image or (IMAGE_RE if spec.use_re else IMAGE_BASE)
-    if image in {IMAGE_BASE, IMAGE_RE}:
+    image = spec.image or IMAGE_BASE
+    if image == IMAGE_BASE:
         ensure_image(
             image,
             log=lambda line: print(line, file=sys.stderr),  # noqa: T201
@@ -579,16 +576,16 @@ def image_up_to_date(tag: str) -> bool:
 
 def delete_images() -> list[str]:
     """
-    Delete the sbclaude images (RE first, then base).
+    Delete the sbclaude image.
 
     Returns
     -------
     list[str]
-        Tags that were removed (missing images are ignored).
+        Tags that were removed (a missing image is ignored).
     """
     client = _client()
     removed: list[str] = []
-    for tag in (IMAGE_RE, IMAGE_BASE):
+    for tag in (IMAGE_BASE,):
         try:
             client.images.remove(tag, force=True)
         except docker.errors.ImageNotFound:
@@ -607,17 +604,17 @@ def ensure_image(image: str,
     Parameters
     ----------
     image : str
-        The image tag to ensure. Only the sbclaude images are auto-built.
+        The image tag to ensure. Only the sbclaude image is auto-built.
     log : Callable[[str], None]
         Sink for build log lines.
     debian_mirror : str | None
-        Debian archive mirror to bake into the base image when a build is triggered.
+        Debian archive mirror to bake into the image when a build is triggered.
     """
-    if image not in {IMAGE_BASE, IMAGE_RE} or image_up_to_date(image):
+    if image != IMAGE_BASE or image_up_to_date(image):
         return
     verb = 'rebuilding (Dockerfile changed)' if image_exists(image) else 'building'
     log(f'Image {image} {verb}...')
-    for line in build_images(with_re=image == IMAGE_RE, debian_mirror=debian_mirror):
+    for line in build_images(debian_mirror=debian_mirror):
         log(line)
 
 
@@ -695,22 +692,16 @@ def stop(name: str | None = None, project: Path | None = None) -> Iterator[str]:
         yield ctr.name or ''
 
 
-def build_images(*,
-                 with_re: bool = True,
-                 no_cache: bool = False,
-                 debian_mirror: str | None = None) -> Iterator[str]:
+def build_images(*, no_cache: bool = False, debian_mirror: str | None = None) -> Iterator[str]:
     """
-    Build the sbclaude images, yielding log lines.
+    Build the sbclaude image, yielding log lines.
 
     Parameters
     ----------
-    with_re : bool
-        Also build the reverse-engineering image.
     no_cache : bool
         Disable the build cache.
     debian_mirror : str | None
-        Debian archive mirror to bake into the base image's apt sources. The RE image
-        inherits the rewritten sources, so the build argument is passed to the base only.
+        Debian archive mirror to bake into the image's apt sources.
 
     Yields
     ------
@@ -718,23 +709,19 @@ def build_images(*,
         Build log lines.
     """
     client = _client()
-    targets: Sequence[tuple[str, str]] = [(IMAGE_BASE, 'Dockerfile')]
-    if with_re:
-        targets = [*targets, (IMAGE_RE, 'Dockerfile.re')]
     mirror = debian_mirror.rstrip('/') if debian_mirror else None
     with resources.as_file(resources.files('sbclaude') / 'docker') as ctx:
         labels = {HASH_LABEL: _dir_hash(Path(ctx))}
-        for tag, dockerfile in targets:
-            yield f'==> Building {tag} ({dockerfile})'
-            buildargs = {'DEBIAN_MIRROR': mirror} if mirror and dockerfile == 'Dockerfile' else None
-            for chunk in client.api.build(path=str(ctx),
-                                          dockerfile=dockerfile,
-                                          tag=tag,
-                                          nocache=no_cache,
-                                          labels=labels,
-                                          buildargs=buildargs,
-                                          decode=True,
-                                          rm=True):
-                line = chunk.get('stream') or chunk.get('error') or ''
-                if line.strip():
-                    yield line.rstrip('\n')
+        yield f'==> Building {IMAGE_BASE} (Dockerfile)'
+        buildargs = {'DEBIAN_MIRROR': mirror} if mirror else None
+        for chunk in client.api.build(path=str(ctx),
+                                      dockerfile='Dockerfile',
+                                      tag=IMAGE_BASE,
+                                      nocache=no_cache,
+                                      labels=labels,
+                                      buildargs=buildargs,
+                                      decode=True,
+                                      rm=True):
+            line = chunk.get('stream') or chunk.get('error') or ''
+            if line.strip():
+                yield line.rstrip('\n')

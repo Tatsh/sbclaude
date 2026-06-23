@@ -1,23 +1,29 @@
 """
 Configuration loading for sbclaude.
 
-The config file is TOML at :func:`config_path` (``~/.config/sbclaude/config.toml`` on
-Linux). All keys are optional.
+All options live under a ``[tool.sbclaude]`` table. They are read from the global config
+file at :func:`config_path` (``~/.config/sbclaude/config.toml`` on Linux) and, when a project
+directory is given, overlaid with the project's ``pyproject.toml`` ``[tool.sbclaude]`` table
+(project values win). Every key is optional.
 
 .. code-block:: toml
 
-    default_flags = ["--re", "--x11"]
-    network = "bridge"
-    # image = "sbclaude-re:latest"
+    [tool.sbclaude]
+    re = true
+    x11 = true
+    network = "host"
     ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"]
     rw = []
+
+    [tool.sbclaude.env]
+    CLAUDE_CODE_USE_BEDROCK = "1"
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from platformdirs import user_config_path
 import tomlkit
@@ -47,71 +53,115 @@ def config_path() -> Path:
 class Config:
     """Resolved sbclaude configuration."""
 
-    default_flags: list[str] = field(default_factory=list)
-    """Flags applied to every run."""
+    android: bool = False
+    """Whether to mount the Android SDK and related devices."""
+    cpus: str | None = None
+    """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
+    debian_mirror: str | None = None
+    """Debian archive mirror used when building the image, or ``None`` for the default."""
+    docker_args: list[str] = field(default_factory=list)
+    """Extra arguments passed to ``docker run``."""
+    env: dict[str, str] = field(default_factory=dict)
+    """Fixed environment variables injected into the box."""
+    ghidra: bool = False
+    """Whether to mount the host Ghidra installation read-only."""
+    gpg: bool = False
+    """Whether to mount the host GnuPG home and agent socket for commit signing."""
+    harden: bool = True
+    """Whether to apply the container hardening flags."""
+    image: str | None = None
+    """Image override, or ``None`` to use the default."""
+    ios: bool = False
+    """Whether to mount the host usbmuxd socket so frida can reach an iOS device."""
+    manage_uv_env: bool = True
+    """Whether to point ``UV_PROJECT_ENVIRONMENT`` at a container-local path by default."""
+    memory: str | None = None
+    """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
+    network: str = DEFAULT_NETWORK
+    """Docker network mode."""
+    pass_env: list[str] = field(default_factory=list)
+    """Host environment variable names to forward into the box."""
+    re: bool = False
+    """Whether to enable the reverse-engineering host mounts (Ghidra and Android together)."""
+    recover: bool = False
+    """Whether to install cc-session-recover (auto-resume) into the project by default."""
     ro: list[str] = field(default_factory=list)
     """Read-only mount patterns (globs and ``~`` accepted)."""
     rw: list[str] = field(default_factory=list)
     """Read-write mount patterns (globs and ``~`` accepted)."""
-    env: dict[str, str] = field(default_factory=dict)
-    """Fixed environment variables injected into the box."""
-    pass_env: list[str] = field(default_factory=list)
-    """Host environment variable names to forward into the box."""
-    docker_args: list[str] = field(default_factory=list)
-    """Extra arguments passed to ``docker run``."""
-    image: str | None = None
-    """Image override, or ``None`` to auto-select."""
-    network: str = DEFAULT_NETWORK
-    """Docker network mode."""
-    debian_mirror: str | None = None
-    """Debian archive mirror used when building the images, or ``None`` for the default."""
-    harden: bool = True
-    """Whether to apply the container hardening flags."""
-    memory: str | None = None
-    """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
-    cpus: str | None = None
-    """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
-    recover: bool = False
-    """Whether to install cc-session-recover (auto-resume) into the project by default."""
-    manage_uv_env: bool = True
-    """Whether to point ``UV_PROJECT_ENVIRONMENT`` at a container-local path by default."""
+    ssh: bool = False
+    """Whether to mount the host ``~/.ssh`` directory read-only for SSH git remotes."""
+    usb: bool = False
+    """Whether to expose ``/dev/bus/usb`` for adb over USB."""
+    x11: bool = False
+    """Whether to forward X11 ``DISPLAY`` and ``XAUTHORITY``."""
 
 
-def load_config(path: Path | None = None) -> Config:
+def _tool_table(path: Path) -> dict[str, Any]:
+    # Return the [tool.sbclaude] table from a TOML file, or an empty mapping when the file
+    # or table is absent.
+    if not path.is_file():
+        return {}
+    tool = tomlkit.parse(path.read_text(encoding='utf-8')).get('tool')
+    sbclaude = tool.get('sbclaude') if isinstance(tool, dict) else None
+    return dict(sbclaude) if isinstance(sbclaude, dict) else {}
+
+
+def _str_list(value: Any) -> list[str]:
+    # Coerce a TOML array (or absent value) to a list of strings.
+    return [str(x) for x in value] if value else []
+
+
+def _str_dict(value: Any) -> dict[str, str]:
+    # Coerce a TOML table (or absent value) to a string-to-string mapping.
+    return {str(k): str(v) for k, v in dict(value).items()} if value else {}
+
+
+def load_config(path: Path | None = None, *, project: Path | None = None) -> Config:
     """
-    Load the TOML config, returning defaults when it does not exist.
+    Load the ``[tool.sbclaude]`` config, returning defaults when it does not exist.
+
+    The global config file is read first; when ``project`` is given, the project's
+    ``pyproject.toml`` ``[tool.sbclaude]`` table is overlaid on top, so project values
+    override the global ones (the ``env`` tables are merged key by key).
 
     Parameters
     ----------
     path : Path | None
-        Override the config path (mainly for tests).
+        Override the global config path (mainly for tests).
+    project : Path | None
+        Project directory whose ``pyproject.toml`` overrides the global config.
 
     Returns
     -------
     Config
         The parsed configuration.
     """
-    path = path or config_path()
-    if not path.is_file():
-        return Config()
-    data = tomlkit.parse(path.read_text())
-    return Config(default_flags=[str(x) for x in data.get('default_flags', [])],
-                  ro=[str(x) for x in data.get('ro', [])],
-                  rw=[str(x) for x in data.get('rw', [])],
-                  env={
-                      str(k): str(v)
-                      for k, v in dict(data.get('env', {})).items()
-                  },
-                  pass_env=[str(x) for x in data.get('pass_env', [])],
-                  docker_args=[str(x) for x in data.get('docker_args', [])],
-                  image=(str(data['image']) if data.get('image') else None),
-                  network=str(data.get('network', DEFAULT_NETWORK)),
-                  debian_mirror=(str(data['debian_mirror']) if data.get('debian_mirror') else None),
-                  harden=bool(data.get('harden', True)),
-                  memory=(str(data['memory']) if data.get('memory') is not None else None),
+    data = _tool_table(path or config_path())
+    if project is not None and (proj := _tool_table(project / 'pyproject.toml')):
+        env = {**_str_dict(data.get('env')), **_str_dict(proj.get('env'))}
+        data = {**data, **proj, **({'env': env} if env else {})}
+    return Config(android=bool(data.get('android', False)),
                   cpus=(str(data['cpus']) if data.get('cpus') is not None else None),
+                  debian_mirror=(str(data['debian_mirror']) if data.get('debian_mirror') else None),
+                  docker_args=_str_list(data.get('docker_args')),
+                  env=_str_dict(data.get('env')),
+                  ghidra=bool(data.get('ghidra', False)),
+                  gpg=bool(data.get('gpg', False)),
+                  harden=bool(data.get('harden', True)),
+                  image=(str(data['image']) if data.get('image') else None),
+                  ios=bool(data.get('ios', False)),
+                  manage_uv_env=bool(data.get('manage_uv_env', True)),
+                  memory=(str(data['memory']) if data.get('memory') is not None else None),
+                  network=str(data.get('network', DEFAULT_NETWORK)),
+                  pass_env=_str_list(data.get('pass_env')),
+                  re=bool(data.get('re', False)),
                   recover=bool(data.get('recover', False)),
-                  manage_uv_env=bool(data.get('manage_uv_env', True)))
+                  ro=_str_list(data.get('ro')),
+                  rw=_str_list(data.get('rw')),
+                  ssh=bool(data.get('ssh', False)),
+                  usb=bool(data.get('usb', False)),
+                  x11=bool(data.get('x11', False)))
 
 
 def expand_paths(patterns: Sequence[str]) -> Iterator[Path]:

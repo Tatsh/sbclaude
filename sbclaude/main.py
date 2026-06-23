@@ -46,7 +46,11 @@ def main(ctx: click.Context) -> None:
               help="Docker memory limit, e.g. 8g. Default auto-caps from host RAM; '0' "
               'disables. Only applied when hardening is on.')
 @click.option('--cpus', help='Docker CPU limit, e.g. 4. Only applied when hardening is on.')
-@click.option('-R', '--re', 'use_re', is_flag=True, help='RE image + Ghidra + Android tools.')
+@click.option('-R',
+              '--re',
+              'use_re',
+              is_flag=True,
+              help='Enable the Ghidra and Android host mounts together.')
 @click.option('--ghidra', 'use_ghidra', is_flag=True, help='Mount host Ghidra (read-only).')
 @click.option('--android',
               'use_android',
@@ -94,22 +98,20 @@ def run(project: Path | None, rw_extra: tuple[str,
         use_ssh: bool, use_gpg: bool, no_harden: bool, session_recover: bool, debug: bool) -> None:
     """Launch claude in a fresh container. Args after ``--`` pass through to claude."""  # noqa: DOC501
     setup_logging(debug=debug, loggers={'sbclaude': {}})
-    cfg = load_config()
-    flags = set(cfg.default_flags)
-    use_re = use_re or '--re' in flags
-    use_ghidra = use_ghidra or use_re or '--ghidra' in flags
-    use_android = use_android or use_re or '--android' in flags
-    use_usb = use_usb or '--usb' in flags
-    use_ios = use_ios or '--ios' in flags
-    use_x11 = use_x11 or '--x11' in flags
-    use_ssh = use_ssh or '--ssh' in flags
-    use_gpg = use_gpg or '--gpg' in flags
+    proj = (project or Path.cwd()).resolve()
+    cfg = load_config(project=proj)
+    use_re = use_re or cfg.re
+    use_ghidra = use_ghidra or use_re or cfg.ghidra
+    use_android = use_android or use_re or cfg.android
+    use_usb = use_usb or cfg.usb
+    use_ios = use_ios or cfg.ios
+    use_x11 = use_x11 or cfg.x11
+    use_ssh = use_ssh or cfg.ssh
+    use_gpg = use_gpg or cfg.gpg
     debian_mirror = debian_mirror or cfg.debian_mirror
     memory = memory or cfg.memory
     cpus = cpus or cfg.cpus
-    # --session-recover (or the config recover key / default_flags) enables it; off otherwise.
-    session_recover = session_recover or cfg.recover or '--session-recover' in flags
-    proj = (project or Path.cwd()).resolve()
+    session_recover = session_recover or cfg.recover
     spec = container.RunSpec(project=proj,
                              name=name or container.unique_name(proj),
                              network=network or cfg.network,
@@ -223,20 +225,14 @@ def shell(name: str | None) -> None:
 
 
 @main.command()
-@click.option('--no-re',
-              'with_re',
-              flag_value=False,
-              default=True,
-              type=bool,
-              help='Skip building the RE image.')
 @click.option('--no-cache', is_flag=True, help='Build without the cache.')
 @click.option('--debian-mirror',
-              help='Debian archive mirror to bake into the base image, e.g. '
+              help='Debian archive mirror to bake into the image, e.g. '
               'http://ftp.us.debian.org/debian.')
-def build(debian_mirror: str | None, *, with_re: bool, no_cache: bool) -> None:
-    """Build the sbclaude Docker images from the packaged Dockerfiles."""
+def build(debian_mirror: str | None, *, no_cache: bool) -> None:
+    """Build the sbclaude Docker image from the packaged Dockerfile."""
     mirror = debian_mirror or load_config().debian_mirror
-    for line in container.build_images(with_re=with_re, no_cache=no_cache, debian_mirror=mirror):
+    for line in container.build_images(no_cache=no_cache, debian_mirror=mirror):
         click.echo(line)
 
 
