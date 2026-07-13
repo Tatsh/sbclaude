@@ -14,7 +14,6 @@ autouse
 avdmanager
 baksmali
 bascom
-bgra
 binutils
 bsdmainutils
 bsky
@@ -35,8 +34,6 @@ dataclasses
 datatable
 datatables
 deark
-dearmor
-dearmoured
 debugpy
 defense
 dejavu
@@ -72,7 +69,6 @@ glab
 globaltoc
 gnupghome
 gosu
-gosu'd
 gpgconf
 gpgsign
 handoff
@@ -93,6 +89,7 @@ launchable
 lextudio
 libao
 libasound
+libcairo
 libera
 libfontconfig
 libfreetype
@@ -124,7 +121,6 @@ localuser
 lockdownd
 logname
 manylinux
-miniz
 mktemp
 modindex
 monkeypatch
@@ -181,7 +177,6 @@ smali
 snapcore
 snapcraft
 soupsieve
-speex
 sphinxcontrib
 statusline
 syft
@@ -207,7 +202,6 @@ usbutils
 vars
 vendored
 venv
-venv's
 vers
 vgmstream
 virtualenv

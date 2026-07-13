@@ -3,11 +3,11 @@
 # and launch Claude Code with no permission prompts.
 #
 # Why mirror the host identity (UID/GID/USER/HOME) instead of using a baked-in
-# user?  Two reasons:
+# user? Two reasons:
 #   1. Mounted files in ~/.claude (notably .credentials.json, mode 0600) must be
 #      owned by the same UID we run as, or auth breaks.
 #   2. Mirroring HOME means "~"-relative settings (e.g. additionalDirectories:
-#      ["~/dev/wiswa"]) resolve to the SAME absolute path inside and outside the
+#      ["~/project-name"]) resolve to the SAME absolute path inside and outside the
 #      container, so host paths "just work".
 set -euo pipefail
 
@@ -16,8 +16,8 @@ set -euo pipefail
 : "${HOST_USER:=claude}"
 : "${HOST_HOME:=/home/${HOST_USER}}"
 
-# --dangerously-skip-permissions refuses to run as root. Mirroring root would
-# also defeat the point, so fail loudly with a clear message.
+# --dangerously-skip-permissions refuses to run as root. Mirroring root would also defeat the point,
+# so fail loudly with a clear message.
 if [ "$HOST_UID" -eq 0 ]; then
     echo "sbclaude: refusing to run as UID 0 (--dangerously-skip-permissions disallows root)." >&2
     echo "            Re-run as a non-root host user." >&2
@@ -29,24 +29,24 @@ if ! getent group "$HOST_GID" >/dev/null 2>&1; then
     groupadd -g "$HOST_GID" "$HOST_USER" >/dev/null 2>&1 || true
 fi
 
-# Create the user for HOST_UID if one does not already exist. -M: do not create
-# or touch the home dir here (it is provided by mounts); we only need a passwd
-# entry so getpwuid()-based tools (git, claude) resolve a name and home.
+# Create the user for HOST_UID if one does not already exist. -M: do not create or touch the home
+# dir here (it is provided by mounts); we only need a passwd entry so getpwuid()-based tools (git,
+# claude) resolve a name and home.
 if ! getent passwd "$HOST_UID" >/dev/null 2>&1; then
-    useradd -u "$HOST_UID" -g "$HOST_GID" -d "$HOST_HOME" -s /bin/bash -M "$HOST_USER" >/dev/null 2>&1 || true
+    useradd -u "$HOST_UID" -g "$HOST_GID" -d "$HOST_HOME" -s /bin/bash \
+        -M "$HOST_USER" >/dev/null 2>&1 || true
 fi
 USER_NAME="$(getent passwd "$HOST_UID" | cut -d: -f1)"
 USER_NAME="${USER_NAME:-$HOST_USER}"
 
-# Ensure HOME exists (Docker auto-creates mount targets as root; the top-level
-# home dir itself may not be a mount). Chown only the top dir, never recurse
-# into mounted subtrees.
+# Ensure HOME exists (Docker auto-creates mount targets as root; the top-level home dir itself may
+# not be a mount). Chown only the top dir, never recurse into mounted subtrees.
 mkdir -p "$HOST_HOME"
 chown "$HOST_UID:$HOST_GID" "$HOST_HOME" 2>/dev/null || true
 
 # The host config records installMethod=native, so claude expects its own binary at
-# ~/.local/bin/claude. We bind-mount it at /usr/local/bin/claude instead, so create the
-# expected symlink to silence the "claude command not found at ~/.local/bin/claude" warning.
+# ~/.local/bin/claude. We bind-mount it at /usr/local/bin/claude instead, so create the expected
+# symlink to silence the "claude command not found at ~/.local/bin/claude" warning.
 mkdir -p "$HOST_HOME/.local/bin"
 ln -sf /usr/local/bin/claude "$HOST_HOME/.local/bin/claude"
 chown -R "$HOST_UID:$HOST_GID" "$HOST_HOME/.local" 2>/dev/null || true
@@ -57,17 +57,14 @@ if [ "${SBCLAUDE_SKIP_PERMISSIONS:-1}" = "1" ]; then
     SKIP_FLAG=(--dangerously-skip-permissions)
 fi
 
-# Put the user's ~/.local/bin first on PATH (claude warns when it is missing) while
-# keeping the image's toolchain PATH after it.
+# Put the user's ~/.local/bin first on PATH (claude warns when it is missing) while keeping the
+# image's toolchain PATH after it.
 export PATH="$HOST_HOME/.local/bin:$PATH"
 
-# Set up cc-session-recover in the project (auto-resume across quota pauses) when
-# SBCLAUDE_RECOVER=1 (sbclaude sets this for --session-recover). The installer is the
-# vendored clone at /opt/cc-session-recover; it copies its hook templates relative to its
-# own location and merges them into the project's .claude/settings.local.json. It runs as
-# the mapped user so the files it writes into the project (.claude/hooks,
-# .claude/settings.local.json, HANDOFF.md) are owned correctly. A failed install aborts the
-# session: recovery was explicitly requested, so starting without it would silently drop it.
+# Set up cc-session-recover in the project (auto-resume across quota pauses) when SBCLAUDE_RECOVER=1
+# (sbclaude sets this for --session-recover). The installer is the clone at /opt/cc-session-recover;
+# it copies its hook templates relative to its own location and merges them into the project's
+# .claude/settings.local.json. A failed install aborts the session.
 RECOVER_INSTALLER=/opt/cc-session-recover/scripts/install-into-project.sh
 # The recovery artifacts to keep out of the project's git history. The installer's own
 # .gitignore handling is patched out in the image; we append exactly these entries instead
@@ -92,11 +89,10 @@ if [ "${SBCLAUDE_RECOVER:-0}" = "1" ]; then
         echo "sbclaude: cc-session-recover install failed; aborting (no session started)." >&2
         exit 1
     fi
-    # Append each recovery artifact to the project's .gitignore when missing (creating the
-    # file if needed). The array is expanded into the inner shell's positional parameters.
-    # Runs as the mapped user for correct ownership; best-effort, so a write failure here
-    # does not abort the now-installed session.
-    # shellcheck disable=SC2016  # $1/$@/$entry intentionally expand in the gosu'd shell.
+    # Append each recovery artifact to the project's .gitignore when missing (creating the file if
+    # needed). The array is expanded into the inner shell's positional parameters. Runs as the
+    # mapped user for correct ownership. A write failure here will not abort the session.
+    # shellcheck disable=SC2016
     gosu "$HOST_UID:$HOST_GID" \
         env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
         bash -c '
