@@ -59,50 +59,50 @@ _NAME_SANITIZE = re.compile(r'[^a-zA-Z0-9_.-]')
 class RunSpec:
     """Fully-resolved description of a ``run`` invocation."""
 
-    project: Path
-    """Project path (read-write, becomes the working directory)."""
-    name: str
-    """Container name."""
-    network: str = 'host'
-    """Docker network mode."""
-    image: str | None = None
-    """Image override, or ``None`` to auto-select."""
-    use_re: bool = False
-    """Whether to enable the reverse-engineering host mounts (Ghidra and Android together)."""
-    use_ghidra: bool = False
-    """Whether to mount the host Ghidra installation read-only."""
-    use_android: bool = False
-    """Whether to mount the Android SDK and related devices."""
-    use_usb: bool = False
-    """Whether to expose ``/dev/bus/usb`` for adb over USB."""
-    use_ios: bool = False
-    """Whether to mount the host usbmuxd socket so frida can reach an iOS device."""
-    use_x11: bool = False
-    """Whether to forward X11 ``DISPLAY`` and ``XAUTHORITY``."""
-    use_ssh: bool = False
-    """Whether to mount the host ``~/.ssh`` directory read-only for SSH git remotes."""
-    use_gpg: bool = False
-    """Whether to mount the host GnuPG home and agent socket for commit signing."""
-    ro: list[Path] = field(default_factory=list)
-    """Read-only mount paths."""
-    rw: list[Path] = field(default_factory=list)
-    """Read-write mount paths."""
-    env: dict[str, str] = field(default_factory=dict)
-    """Environment variables injected into the box."""
-    harden: bool = True
-    """Whether to apply the container hardening flags."""
-    memory: str | None = None
-    """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
-    cpus: str | None = None
-    """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
-    recover: bool = False
-    """Whether to install cc-session-recover (auto-resume) into the project on start."""
-    debian_mirror: str | None = None
-    """Debian archive mirror for an auto-triggered image build, or ``None`` for the default."""
     extra_args: list[str] = field(default_factory=list)
     """Extra arguments passed to ``docker run``."""
     claude_args: tuple[str, ...] = ()
     """Arguments forwarded to ``claude``."""
+    cpus: str | None = None
+    """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
+    debian_mirror: str | None = None
+    """Debian archive mirror for an auto-triggered image build, or ``None`` for the default."""
+    env: dict[str, str] = field(default_factory=dict)
+    """Environment variables injected into the box."""
+    harden: bool = True
+    """Whether to apply the container hardening flags."""
+    image: str | None = None
+    """Image override, or ``None`` to auto-select."""
+    memory: str | None = None
+    """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
+    name: str
+    """Container name."""
+    network: str = 'host'
+    """Docker network mode."""
+    project: Path
+    """Project path (read-write, becomes the working directory)."""
+    recover: bool = False
+    """Whether to install cc-session-recover (auto-resume) into the project on start."""
+    ro: list[Path] = field(default_factory=list)
+    """Read-only mount paths."""
+    rw: list[Path] = field(default_factory=list)
+    """Read-write mount paths."""
+    use_android: bool = False
+    """Whether to mount the Android SDK and related devices."""
+    use_gpg: bool = False
+    """Whether to mount the host GnuPG home and agent socket for commit signing."""
+    use_ghidra: bool = False
+    """Whether to mount the host Ghidra installation read-only."""
+    use_ios: bool = False
+    """Whether to mount the host usbmuxd socket so frida can reach an iOS device."""
+    use_re: bool = False
+    """Whether to enable the reverse-engineering host mounts (Ghidra and Android together)."""
+    use_ssh: bool = False
+    """Whether to mount the host ``~/.ssh`` directory read-only for SSH git remotes."""
+    use_usb: bool = False
+    """Whether to expose ``/dev/bus/usb`` for adb over USB."""
+    use_x11: bool = False
+    """Whether to forward X11 ``DISPLAY`` and ``XAUTHORITY``."""
 
 
 def default_name(project: Path) -> str:
@@ -220,10 +220,8 @@ def _v(src: Path | str, dst: Path | str | None = None, *, ro: bool = False) -> t
 
 
 def _auto_memory_bytes() -> int | None:
-    # Cap container memory below the host total so the box can never drive the host into
-    # OOM or swap thrashing. Reserve the larger of 2 GiB or an eighth of RAM for the host
-    # and dockerd. Returns None on tiny hosts (let Docker default apply) or if the host
-    # total cannot be determined.
+    # Reserve the larger of 2 GiB or an eighth of RAM for the host and dockerd. Returns None on
+    # tiny hosts (let Docker default apply) or if the host total cannot be determined.
     try:
         total = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
     except (AttributeError, OSError, ValueError):
@@ -233,11 +231,6 @@ def _auto_memory_bytes() -> int | None:
 
 
 def _resource_args(spec: RunSpec) -> list[str]:
-    # Bound the container so it cannot lock up the host. --memory plus an equal
-    # --memory-swap means the box gets a fixed RAM budget and no extra swap, so it is
-    # OOM-killed instead of thrashing host swap; cgroups (the systemd cgroup driver on a
-    # systemd host) enforce this. ``memory='0'`` opts out; an explicit value overrides the
-    # auto cap. CPU is only capped when requested, since saturation slows but never locks.
     args: list[str] = []
     memory = spec.memory
     if memory is None and (auto := _auto_memory_bytes()) is not None:
@@ -296,7 +289,6 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         '-w',
         str(spec.project)
     ]
-    # Mirror CLAUDE_CONFIG_DIR into the box so claude reads the relocated config.
     if os.environ.get('CLAUDE_CONFIG_DIR'):
         argv += ['-e', f'CLAUDE_CONFIG_DIR={cfg_dir}']
     # The legacy top-level config/auth file (only when it still lives in $HOME).
