@@ -88,14 +88,31 @@ def main(ctx: click.Context) -> None:
               help='Install cc-session-recover (auto-resume) into the project on start.')
 @click.option('-d', '--debug', is_flag=True, help='Enable debug level logging.')
 @click.argument('claude_args', nargs=-1, type=click.UNPROCESSED)
-def run(project: Path | None, rw_extra: tuple[str,
-                                              ...], ro_extra: tuple[str,
-                                                                    ...], env_extra: tuple[str,
-                                                                                           ...],
-        name: str | None, image: str | None, network: str | None, debian_mirror: str | None,
-        memory: str | None, cpus: str | None, claude_args: tuple[str, ...], *, use_re: bool,
-        use_ghidra: bool, use_android: bool, use_usb: bool, use_ios: bool, use_x11: bool,
-        use_ssh: bool, use_gpg: bool, no_harden: bool, session_recover: bool, debug: bool) -> None:
+def run(
+    project: Path | None,
+    rw_extra: tuple[str, ...],
+    ro_extra: tuple[str, ...],
+    env_extra: tuple[str, ...],
+    name: str | None,
+    image: str | None,
+    network: str | None,
+    debian_mirror: str | None,
+    memory: str | None,
+    cpus: str | None,
+    claude_args: tuple[str, ...],
+    *,
+    use_re: bool,
+    use_ghidra: bool,
+    use_android: bool,
+    use_usb: bool,
+    use_ios: bool,
+    use_x11: bool,
+    use_ssh: bool,
+    use_gpg: bool,
+    no_harden: bool,
+    session_recover: bool,
+    debug: bool,
+) -> None:
     """Launch claude in a fresh container. Args after ``--`` pass through to claude."""  # noqa: DOC501
     setup_logging(debug=debug, loggers={'sbclaude': {}})
     proj = (project or Path.cwd()).resolve()
