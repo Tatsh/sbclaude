@@ -98,8 +98,6 @@ class Config:
 
 
 def _tool_table(path: Path) -> dict[str, Any]:
-    # Return the [tool.sbclaude] table from a TOML file, or an empty mapping when the file
-    # or table is absent.
     if not path.is_file():
         return {}
     tool = tomlkit.parse(path.read_text(encoding='utf-8')).get('tool')
@@ -108,12 +106,10 @@ def _tool_table(path: Path) -> dict[str, Any]:
 
 
 def _str_list(value: Any) -> list[str]:
-    # Coerce a TOML array (or absent value) to a list of strings.
     return [str(x) for x in value] if value else []
 
 
 def _str_dict(value: Any) -> dict[str, str]:
-    # Coerce a TOML table (or absent value) to a string-to-string mapping.
     return {str(k): str(v) for k, v in dict(value).items()} if value else {}
 
 
