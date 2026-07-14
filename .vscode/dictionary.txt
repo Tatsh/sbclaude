@@ -37,6 +37,7 @@ deark
 debugpy
 defense
 dejavu
+delenv
 dialog
 dockerfiles
 docstrings
@@ -175,6 +176,7 @@ shellformat
 shntool
 signingkey
 signtool
+sigwinch
 smali
 snapcore
 snapcraft
