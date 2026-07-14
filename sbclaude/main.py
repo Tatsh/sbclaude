@@ -52,6 +52,7 @@ def main(ctx: click.Context) -> None:
               is_flag=True,
               help='Enable the Ghidra and Android host mounts together.')
 @click.option('--ghidra', 'use_ghidra', is_flag=True, help='Mount host Ghidra (read-only).')
+@click.option('--gpu', 'use_gpu', is_flag=True, help='Expose the host GPUs.')
 @click.option('--android',
               'use_android',
               is_flag=True,
@@ -103,6 +104,7 @@ def run(
     *,
     use_re: bool,
     use_ghidra: bool,
+    use_gpu: bool,
     use_android: bool,
     use_usb: bool,
     use_ios: bool,
@@ -119,6 +121,7 @@ def run(
     cfg = load_config(project=proj)
     use_re = use_re or cfg.re
     use_ghidra = use_ghidra or use_re or cfg.ghidra
+    use_gpu = use_gpu or cfg.gpu
     use_android = use_android or use_re or cfg.android
     use_usb = use_usb or cfg.usb
     use_ios = use_ios or cfg.ios
@@ -135,6 +138,7 @@ def run(
                              image=image or cfg.image,
                              use_re=use_re,
                              use_ghidra=use_ghidra,
+                             use_gpu=use_gpu,
                              use_android=use_android,
                              use_usb=use_usb,
                              use_ios=use_ios,

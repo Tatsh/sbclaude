@@ -58,7 +58,10 @@ _NAME_SANITIZE = re.compile(r'[^a-zA-Z0-9_.-]')
 @dataclass
 class RunSpec:
     """Fully-resolved description of a ``run`` invocation."""
-
+    name: str
+    """Container name."""
+    project: Path
+    """Project path (read-write, becomes the working directory)."""
     extra_args: list[str] = field(default_factory=list)
     """Extra arguments passed to ``docker run``."""
     claude_args: tuple[str, ...] = ()
@@ -75,12 +78,8 @@ class RunSpec:
     """Image override, or ``None`` to auto-select."""
     memory: str | None = None
     """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
-    name: str
-    """Container name."""
     network: str = 'host'
     """Docker network mode."""
-    project: Path
-    """Project path (read-write, becomes the working directory)."""
     recover: bool = False
     """Whether to install cc-session-recover (auto-resume) into the project on start."""
     ro: list[Path] = field(default_factory=list)
@@ -93,6 +92,8 @@ class RunSpec:
     """Whether to mount the host GnuPG home and agent socket for commit signing."""
     use_ghidra: bool = False
     """Whether to mount the host Ghidra installation read-only."""
+    use_gpu: bool = False
+    """Whether to expose the host NVIDIA GPU(s) via the NVIDIA Container Toolkit."""
     use_ios: bool = False
     """Whether to mount the host usbmuxd socket so frida can reach an iOS device."""
     use_re: bool = False
@@ -260,7 +261,7 @@ def config_dir(home: Path) -> Path:
     return Path(override).expanduser() if override else home / '.claude'
 
 
-def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
+def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:  # noqa: C901
     """
     Build the ``docker run`` argv for an interactive claude session.
 
@@ -320,6 +321,8 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
                 argv += _v(tool, ro=True)
     if spec.use_ghidra and Path('/usr/share/ghidra').is_dir():
         argv += _v('/usr/share/ghidra', ro=True)
+    if spec.use_gpu:
+        argv += _gpu_args()
     if spec.use_android:
         argv += _android_args(home)
     if spec.use_usb and Path('/dev/bus/usb').is_dir():
@@ -336,6 +339,14 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     argv.append(image)
     argv += list(spec.claude_args)
     return argv, cleanup
+
+
+def _gpu_args() -> list[str]:
+    args = ['--gpus', 'all', '-e', 'NVIDIA_DRIVER_CAPABILITIES=compute,utility']
+    for dev in (Path('/dev/nvidia0'), Path('/dev/nvidiactl')):
+        if dev.exists():
+            args += ['--group-add', str(dev.stat().st_gid)]
+    return args
 
 
 def _android_args(home: Path) -> Iterator[str]:

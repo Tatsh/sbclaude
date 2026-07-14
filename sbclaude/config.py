@@ -67,6 +67,8 @@ class Config:
     """Whether to mount the host Ghidra installation read-only."""
     gpg: bool = False
     """Whether to mount the host GnuPG home and agent socket for commit signing."""
+    gpu: bool = False
+    """Whether to expose the host NVIDIA GPU(s) via the NVIDIA Container Toolkit."""
     harden: bool = True
     """Whether to apply the container hardening flags."""
     image: str | None = None
@@ -144,6 +146,7 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   env=_str_dict(data.get('env')),
                   ghidra=bool(data.get('ghidra', False)),
                   gpg=bool(data.get('gpg', False)),
+                  gpu=bool(data.get('gpu', False)),
                   harden=bool(data.get('harden', True)),
                   image=(str(data['image']) if data.get('image') else None),
                   ios=bool(data.get('ios', False)),
