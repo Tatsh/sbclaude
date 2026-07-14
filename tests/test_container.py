@@ -512,6 +512,8 @@ def test_build_run_argv_hardened_by_default(mocker: MockerFixture, tmp_path: Pat
     assert '--cap-drop' in argv
     assert 'ALL' in argv
     assert '--pids-limit' in argv
+    cap_adds = {argv[i + 1] for i, arg in enumerate(argv) if arg == '--cap-add'}
+    assert 'KILL' in cap_adds
 
 
 def test_build_run_argv_no_harden(mocker: MockerFixture, tmp_path: Path) -> None:

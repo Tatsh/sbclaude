@@ -52,6 +52,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Claude Code failing to start in the container because the managed settings file was not readable
   by the mapped non-root user (`EACCES`).
+- `tini` (PID 1) crashing with `Unexpected error when forwarding signal: 'Operation not permitted'`
+  when a terminal resize (`SIGWINCH`, e.g. switching tabs over SSH/tmux) had to be forwarded to the
+  non-root child, by adding the `KILL` capability to the hardened capability set.
 
 ## [0.0.1] - 2026-00-00
 

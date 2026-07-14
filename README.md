@@ -281,9 +281,10 @@ it limits blast radius, it is not a guarantee):
 - **Build time:** minimal Debian slim, `--no-install-recommends` + cleaned apt lists, no
   secrets baked in (the `claude` binary and all auth are bind-mounted), OCI provenance
   labels, and **all setuid/setgid bits stripped** from the image.
-- **Run time:** `--security-opt no-new-privileges`, `--cap-drop ALL` plus only the five
-  caps the root entrypoint needs to create the mapped user and drop to it via gosu
-  (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`), a `--pids-limit`, a non-root
+- **Run time:** `--security-opt no-new-privileges`, `--cap-drop ALL` plus only the six
+  caps the root entrypoint needs to create the mapped user, drop to it via gosu, and let
+  `tini` (PID 1) forward signals such as `SIGWINCH` to the non-root child
+  (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETUID`, `SETGID`), a `--pids-limit`, a non-root
   mapped user, and the default seccomp/AppArmor profiles (never disabled). The claude
   process itself ends up with an **empty effective capability set**.
 - **Can't lock the host:** `--pids-limit` stops fork bombs, and `--memory` with an equal

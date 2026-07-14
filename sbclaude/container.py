@@ -42,8 +42,8 @@ HASH_LABEL = 'sbclaude.context_hash'
 IMAGE_BASE = 'sbclaude:latest'
 """Tag of the sbclaude image."""
 HARDENING_ARGS = ('--security-opt', 'no-new-privileges', '--cap-drop', 'ALL', '--cap-add', 'CHOWN',
-                  '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER', '--cap-add', 'SETUID',
-                  '--cap-add', 'SETGID', '--pids-limit', '4096')
+                  '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER', '--cap-add', 'KILL',
+                  '--cap-add', 'SETUID', '--cap-add', 'SETGID', '--pids-limit', '4096')
 """Hardening arguments to Docker."""
 USBMUXD_SOCKET = Path('/var/run/usbmuxd')
 """Host usbmuxd socket that frida's usbmux backend uses to reach an iOS device."""
