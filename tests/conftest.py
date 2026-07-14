@@ -22,6 +22,11 @@ if os.getenv('_PYTEST_RAISE', '0') != '0':  # pragma no cover
 
 
 @pytest.fixture(autouse=True)
+def isolate_claude_config_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv('CLAUDE_CONFIG_DIR', raising=False)
+
+
+@pytest.fixture(autouse=True)
 def recover_stale_process_cwd(request: pytest.FixtureRequest) -> None:
     """
     Recover when the process cwd was removed mid-session.
