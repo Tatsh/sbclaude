@@ -70,7 +70,7 @@ RUN set -eux; \
 RUN git clone https://github.com/softcane/cc-session-recover.git /opt/cc-session-recover \
     && cd /opt/cc-session-recover \
     && git fetch origin pull/2/head:pr2 \
-    && git diff main...pr2 | git apply --3way \
+    && { git diff main...pr2 | git apply --3way; } || true \
     && sed -i 's#^GITIGNORE=.*#GITIGNORE=/dev/null#' scripts/install-into-project.sh \
     && sed -i '/settings\.example\.json" "\$TARGET/d' scripts/install-into-project.sh \
     && rm -rf .git
