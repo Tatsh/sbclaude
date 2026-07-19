@@ -70,13 +70,15 @@ RECOVER_INSTALLER=/opt/cc-session-recover/scripts/install-into-project.sh
 # .gitignore handling is patched out in the image; we append exactly these entries instead
 # (each only when absent), so the set is explicit and stable.
 RECOVER_GITIGNORE_ENTRIES=(
-    /HANDOFF.md
     /.claude/auto-continue.md
+    /.claude/hooks/inject-standing-instructions.sh
+    /.claude/hooks/log-stop-failure.sh
+    /.claude/hooks/remind-on-prompt.sh
+    /.claude/session-recover.js
     /.claude/standing-instructions.md
     /.claude/statusline-quota-cache.sh
-    /.claude/hooks/inject-standing-instructions.sh
-    /.claude/hooks/remind-on-prompt.sh
-    /.claude/hooks/log-stop-failure.sh
+    /HANDOFF.md
+    /session-recover.yaml
 )
 if [ "${SBCLAUDE_RECOVER:-0}" = "1" ]; then
     if [ ! -f "$RECOVER_INSTALLER" ]; then

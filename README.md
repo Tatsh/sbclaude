@@ -184,8 +184,9 @@ into the project, and its own `.gitignore` handling is disabled. The installer w
 project's `.claude/` (hooks and `settings.local.json`, merged with `jq`) and a `HANDOFF.md`;
 because the project is bind-mounted read-write, **those files land in your real repository and
 persist**, which is why this is opt-in. Afterwards the entrypoint appends the recovery artifacts
-(`HANDOFF.md`, `auto-continue.md`, `standing-instructions.md`, `statusline-quota-cache.sh`, and
-the three hook scripts) to the project's `.gitignore`, each only when absent. If the install
+(`HANDOFF.md`, `auto-continue.md`, `session-recover.js`, `session-recover.yaml`,
+`standing-instructions.md`, `statusline-quota-cache.sh`, and the three hook scripts) to the
+project's `.gitignore`, each only when absent. If the install
 fails, the box aborts rather than starting a session that silently lacks recovery.
 
 ## MCP servers
