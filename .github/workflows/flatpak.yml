@@ -5,7 +5,7 @@ jobs:
       options: '--privileged'
     runs-on: '${{ matrix.system.image }}'
     steps:
-      - uses: 'actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10'
+      - uses: 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         with:
           persist-credentials: false
       - id: 'flatpak_bundle'
@@ -27,11 +27,12 @@ jobs:
           name: 'sh.tat.sbclaude-${{ steps.flatpak_bundle.outputs.version }}-${{ matrix.system.arch }}'
           path: '${{ steps.flatpak_bundle.outputs.filename }}'
       - name: 'Attest'
-        uses: 'actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26'
+        uses: 'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6'
         with:
           subject-path: '${{ steps.flatpak_bundle.outputs.filename }}'
       - env:
           FILE: '${{ steps.flatpak_bundle.outputs.filename }}'
+          GH_REPO: '${{ github.repository }}'
           GH_TOKEN: '${{ github.token }}'
         if: "github.ref_type == 'tag'"
         name: 'Create or update draft release'

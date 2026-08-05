@@ -70,7 +70,6 @@ glab
 globaltoc
 gnupghome
 gosu
-gosu's
 gpgconf
 gpgsign
 handoff
