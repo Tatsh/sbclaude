@@ -99,7 +99,7 @@ class RunSpec:
     use_re: bool = False
     """Whether to enable the reverse-engineering host mounts (Ghidra and Android together)."""
     use_ssh: bool = False
-    """Whether to mount the host ``~/.ssh`` directory read-only for SSH git remotes."""
+    """Whether to mount the host ``~/.ssh`` read-only and forward the ssh-agent socket."""
     use_usb: bool = False
     """Whether to expose ``/dev/bus/usb`` for adb over USB."""
     use_x11: bool = False
@@ -378,12 +378,52 @@ def _ios_args() -> list[str]:
     return args
 
 
+def _walk(root: Path) -> Iterator[Path]:
+    # Recurse into real subdirectories only; a symlinked directory is yielded but not
+    # descended into, so a link loop cannot hang the walk.
+    for entry in sorted(root.iterdir()):
+        yield entry
+        if entry.is_dir() and not entry.is_symlink():
+            yield from _walk(entry)
+
+
+def _ssh_link_args(ssh: Path) -> Iterator[str]:
+    # A dotfiles setup commonly symlinks ~/.ssh/config (or a key) to a path outside ~/.ssh.
+    # A bind mount carries the link itself, not its target, so the link dangles in the box
+    # and every Host alias, IdentityFile, and User line is silently lost. Mount each target
+    # read-only at its real path so the link resolves the same way it does on the host.
+    seen: set[Path] = set()
+    for link in _walk(ssh):
+        if not link.is_symlink():
+            continue
+        target = link.resolve()
+        if target not in seen and target.exists() and not target.is_relative_to(ssh):
+            seen.add(target)
+            yield from _v(target, ro=True)
+
+
+def _ssh_agent_args() -> list[str]:
+    # Bridge the host's running ssh-agent into the box. The mounted keys are useless on
+    # their own when they are passphrase-protected or held in a hardware token: only the
+    # live agent can sign the authentication challenge, and nothing inside a no-prompt box
+    # can answer a passphrase prompt. Mounted read-write because connecting to a socket
+    # needs write permission on it.
+    if not (sock := os.environ.get('SSH_AUTH_SOCK', '')):
+        return []
+    if not Path(sock).is_socket():
+        sys.stderr.write(
+            f'sbclaude: --ssh: SSH_AUTH_SOCK={sock} is not a socket; agent not forwarded.\n')
+        return []
+    return [*_v(sock), '-e', f'SSH_AUTH_SOCK={sock}']
+
+
 def _ssh_args(home: Path) -> list[str]:
     # Mount the host ~/.ssh read-only so SSH git remotes authenticate with the host's
     # keys and known_hosts. Read-only protects the keys from the autonomous agent (at
     # the cost of not persisting newly-learnt host keys).
     ssh = home / '.ssh'
-    return list(_v(ssh, ro=True)) if ssh.is_dir() else []
+    args = [*_v(ssh, ro=True), *_ssh_link_args(ssh)] if ssh.is_dir() else []
+    return args + _ssh_agent_args()
 
 
 def _gpg_agent_socket() -> Path | None:

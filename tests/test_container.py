@@ -302,6 +302,129 @@ def test_build_run_argv_ssh(mocker: MockerFixture, tmp_path: Path) -> None:
     assert f'{ssh}:{ssh}:ro' in argv
 
 
+def test_build_run_argv_ssh_symlink_target(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'SSH_AUTH_SOCK': ''})
+    ssh = tmp_path / '.ssh'
+    (ssh / 'nested').mkdir(parents=True)
+    dotfiles = tmp_path / 'dotfiles'
+    dotfiles.mkdir()
+    (config := dotfiles / 'config').write_text('Host x\n')
+    (key := dotfiles / 'id_ed25519').write_text('key\n')
+    (ssh / 'config').symlink_to(config)
+    (ssh / 'nested' / 'id_ed25519').symlink_to(key)
+    (ssh / 'known_hosts').write_text('host\n')
+    (ssh / 'dangling').symlink_to(tmp_path / 'absent')
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_ssh=True))
+    assert f'{config}:{config}:ro' in argv
+    assert f'{key}:{key}:ro' in argv
+    # A link with no target on the host cannot be mounted.
+    assert not any('absent' in arg for arg in argv)
+
+
+def test_build_run_argv_ssh_internal_symlink(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'SSH_AUTH_SOCK': ''})
+    ssh = tmp_path / '.ssh'
+    ssh.mkdir()
+    (real := ssh / 'id_rsa').write_text('key\n')
+    (ssh / 'id_default').symlink_to(real)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_ssh=True))
+    # The target is already inside the mounted ~/.ssh, so no separate mount is added.
+    assert argv.count(f'{real}:{real}:ro') == 0
+
+
+def test_build_run_argv_ssh_symlink_dir(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'SSH_AUTH_SOCK': ''})
+    ssh = tmp_path / '.ssh'
+    ssh.mkdir()
+    keys = tmp_path / 'dotfiles' / 'keys'
+    keys.mkdir(parents=True)
+    vault = tmp_path / 'vault'
+    vault.mkdir()
+    (nested := vault / 'id_ed25519').write_text('key\n')
+    (keys / 'id_ed25519').symlink_to(nested)
+    (ssh / 'keys').symlink_to(keys)
+    # A link back to the directory being walked resolves inside ~/.ssh, so it needs no mount.
+    (ssh / 'loop').symlink_to(ssh)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_ssh=True))
+    # A symlinked directory is mounted whole and not descended into, so a link inside it
+    # gets no mount of its own.
+    assert f'{keys}:{keys}:ro' in argv
+    assert not any(str(nested) in arg for arg in argv)
+    assert not any('loop' in arg for arg in argv)
+    assert argv.count(f'{ssh}:{ssh}:ro') == 1
+
+
+def test_build_run_argv_ssh_symlinks_share_target(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'SSH_AUTH_SOCK': ''})
+    ssh = tmp_path / '.ssh'
+    (ssh / 'nested').mkdir(parents=True)
+    (dotfiles := tmp_path / 'dotfiles').mkdir()
+    (config := dotfiles / 'config').write_text('Host x\n')
+    (ssh / 'config').symlink_to(config)
+    (ssh / 'nested' / 'config').symlink_to(config)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_ssh=True))
+    # Docker rejects a repeated destination, so a shared target is mounted only once.
+    assert argv.count(f'{config}:{config}:ro') == 1
+
+
+def test_build_run_argv_ssh_agent(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    sock = tmp_path / 'run' / 'agent.sock'
+    mocker.patch.dict(os.environ, {'SSH_AUTH_SOCK': str(sock)})
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    ssh = tmp_path / '.ssh'
+    ssh.mkdir()
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_ssh=True))
+    # Mounted read-write: connecting to a socket needs write permission on it.
+    assert f'{sock}:{sock}' in argv
+    assert f'SSH_AUTH_SOCK={sock}' in argv
+
+
+def test_build_run_argv_ssh_agent_no_ssh_dir(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    sock = tmp_path / 'run' / 'agent.sock'
+    mocker.patch.dict(os.environ, {'SSH_AUTH_SOCK': str(sock)})
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_ssh=True))
+    assert f'SSH_AUTH_SOCK={sock}' in argv
+
+
+@pytest.mark.parametrize('value', ['', 'absent'])
+def test_build_run_argv_ssh_agent_unusable(mocker: MockerFixture, tmp_path: Path,
+                                           value: str) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'SSH_AUTH_SOCK': str(tmp_path / value) if value else ''})
+    ssh = tmp_path / '.ssh'
+    ssh.mkdir()
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_ssh=True))
+    assert not any('SSH_AUTH_SOCK' in arg for arg in argv)
+
+
 def test_build_run_argv_gpg(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)

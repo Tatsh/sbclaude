@@ -91,19 +91,19 @@ more than one is running).
 
 ### `run` flags
 
-| Flag                | Effect                                                                         |
-| ------------------- | ------------------------------------------------------------------------------ |
-| `--re`              | enable `--ghidra` + `--android` together                                       |
-| `--ghidra`          | mount host Ghidra (`/usr/share/ghidra`) read-only                              |
-| `--android`         | mount Android SDK + `~/.android` + `/dev/kvm` (adb/emulator)                   |
-| `--usb`             | expose `/dev/bus/usb` for adb over USB                                         |
-| `--ios`             | mount the host `usbmuxd` socket so frida reaches an iOS device over USB        |
-| `--x11`             | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator) |
-| `--ssh`             | mount the host `~/.ssh` read-only for SSH git remotes                          |
-| `--gpg`             | mount the host GnuPG home + agent socket for signing commits                   |
-| `--session-recover` | install `cc-session-recover` (auto-resume) into the project on start           |
-| `--net bridge`      | isolate the box's network (default is `host` — `localhost` = your host)        |
-| `-r/-w/-p/-n/-i`    | extra ro/rw mount, project, container name, image override                     |
+| Flag                | Effect                                                                           |
+| ------------------- | -------------------------------------------------------------------------------- |
+| `--re`              | enable `--ghidra` + `--android` together                                         |
+| `--ghidra`          | mount host Ghidra (`/usr/share/ghidra`) read-only                                |
+| `--android`         | mount Android SDK + `~/.android` + `/dev/kvm` (adb/emulator)                     |
+| `--usb`             | expose `/dev/bus/usb` for adb over USB                                           |
+| `--ios`             | mount the host `usbmuxd` socket so frida reaches an iOS device over USB          |
+| `--x11`             | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator)   |
+| `--ssh`             | mount the host `~/.ssh` read-only and forward the ssh-agent, for SSH git remotes |
+| `--gpg`             | mount the host GnuPG home + agent socket for signing commits                     |
+| `--session-recover` | install `cc-session-recover` (auto-resume) into the project on start             |
+| `--net bridge`      | isolate the box's network (default is `host` — `localhost` = your host)          |
+| `-r/-w/-p/-n/-i`    | extra ro/rw mount, project, container name, image override                       |
 
 ## Configuration
 
@@ -117,7 +117,7 @@ pin its own defaults. All keys optional:
 gpg = true       # mount the GnuPG home + agent for signing
 network = "host" # default; "bridge" to isolate the box's network
 re = true        # enable the Ghidra + Android mounts together
-ssh = true       # mount ~/.ssh read-only for SSH git remotes
+ssh = true       # mount ~/.ssh read-only + forward the ssh-agent for SSH git remotes
 x11 = true       # forward X11 for GUI apps
 # image = "custom:latest"         # force a different image
 # debian_mirror = "http://ftp.us.debian.org/debian" # apt mirror for image builds
@@ -215,7 +215,14 @@ by default (the box is a fully-autonomous, no-prompt agent — see [Hardening](#
 Opt in per run, or globally with `ssh = true` and `gpg = true` under `[tool.sbclaude]`:
 
 - `--ssh` bind-mounts `~/.ssh` **read-only**, so SSH remotes authenticate with the host's
-  keys and `known_hosts`. Read-only means newly-learnt host keys are not written back.
+  keys and `known_hosts`. Read-only means newly-learnt host keys are not written back. It also
+  forwards the host's **ssh-agent**: `$SSH_AUTH_SOCK` is bind-mounted at its own path and set
+  in the box, so keys that are passphrase-protected or held in a hardware token still work —
+  the host agent does the signing and the secret never enters the container. Without this a
+  box holding only encrypted key files would stall on a passphrase prompt nothing can answer.
+  Symlinks inside `~/.ssh` are followed too: a `config` (or key) linked into a dotfiles
+  repository has its target mounted read-only at the same path, so the link does not dangle
+  and every `Host` alias keeps working.
 - `--gpg` bind-mounts the host **GnuPG home** (read-write — `gpg` needs to write lock files
   and the trustdb) and overlays the host's live **gpg-agent socket** at `~/.gnupg/S.gpg-agent`.
   The host agent performs the signing and owns the secret keys, so a cached passphrase carries
@@ -306,3 +313,5 @@ without asking, with unrestricted network. Keep writable mounts minimal (the con
 defaults to read-only for everything but the project) and don't mount secrets you don't
 want a fully-autonomous agent to touch. This is why `--ssh` and `--gpg` are opt-in: they
 expose your private SSH and GPG key material (the GnuPG home read-write) to that agent.
+Forwarding an agent socket does not hand over the secret itself, but it does let the box ask
+the host agent to sign with any key it holds, for as long as the box runs.

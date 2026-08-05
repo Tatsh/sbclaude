@@ -66,7 +66,8 @@ def main(ctx: click.Context) -> None:
 @click.option('--ssh',
               'use_ssh',
               is_flag=True,
-              help='Mount the host ~/.ssh read-only for SSH git remotes.')
+              help='Mount the host ~/.ssh read-only and forward the ssh-agent for SSH git '
+              'remotes.')
 @click.option('--gpg',
               'use_gpg',
               is_flag=True,

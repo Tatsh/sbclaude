@@ -92,7 +92,7 @@ class Config:
     rw: list[str] = field(default_factory=list)
     """Read-write mount patterns (globs and ``~`` accepted)."""
     ssh: bool = False
-    """Whether to mount the host ``~/.ssh`` directory read-only for SSH git remotes."""
+    """Whether to mount the host ``~/.ssh`` read-only and forward the ssh-agent socket."""
     usb: bool = False
     """Whether to expose ``/dev/bus/usb`` for adb over USB."""
     x11: bool = False

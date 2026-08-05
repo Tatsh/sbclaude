@@ -18,7 +18,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `--debian-mirror` option on `build` and `run`, plus a `debian_mirror` config key, to build the
   base image against an alternate Debian archive mirror.
 - `--ssh` and `--gpg` flags on `run`, opt-in mounts of the host `~/.ssh` (read-only) and the host
-  GnuPG home and agent socket for SSH git remotes and signed commits.
+  GnuPG home and agent socket for SSH git remotes and signed commits. `--ssh` also forwards the
+  host's `SSH_AUTH_SOCK`, so agent-held keys (passphrase-protected or in a hardware token) can
+  authenticate, and mounts the targets of symlinks inside `~/.ssh` so a `config` linked into a
+  dotfiles repository does not dangle in the box.
 - The box now points `UV_PROJECT_ENVIRONMENT` at a container-local path by default so `uv` does
   not write a `.venv` into the bind-mounted project; opt out with the `manage_uv_env` config key.
 - `--session-recover` flag on `run`, plus a `recover` config key (off by default), to install
