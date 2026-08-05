@@ -83,6 +83,7 @@ itertools
 jadx
 jinja
 jsonnet
+jsonnetfmt
 jsonschema
 kwargs
 lastexitcode

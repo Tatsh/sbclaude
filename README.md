@@ -36,7 +36,8 @@ container stores nothing of its own (`--rm`); everything lives on the host. You 
 invoke `sbclaude` — it manages its own image and containers via the Docker SDK.
 
 There is a single image, `sbclaude`, built on demand. It bundles everyday coding tools
-(Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv, jq), Qt 6
+(Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv, jq), formatters and
+linters kept at their latest upstream release (clang-format, jsonnet, jsonnetfmt, shellcheck), Qt 6
 development (`qt6-base-dev` plus ninja), and a mobile reverse-engineering toolchain (a JDK,
 frida, mitmproxy, dex2jar, baksmali/smali, and launchers for the host-mounted Ghidra,
 Android SDK, jadx, and apktool).

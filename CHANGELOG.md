@@ -32,6 +32,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `env` tables are merged key by key).
 - The image now ships the Qt 6 development packages (`qt6-base-dev`, `qt6-base-dev-tools`) and
   `ninja-build`.
+- The image now ships `clang-format`, `jsonnet`, `jsonnetfmt`, and `shellcheck`, each pulled from
+  its latest upstream release when the image is built.
 
 ### Changed
 

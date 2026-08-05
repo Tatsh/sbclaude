@@ -134,6 +134,23 @@ RUN wget -qO /usr/local/bin/czkawka_cli \
 RUN git clone --depth 1 https://github.com/Tatsh/pngdefry /tmp/pngdefry \
     && cc -O2 -o /usr/local/bin/pngdefry /tmp/pngdefry/source/pngdefry.c \
     && rm -rf /tmp/pngdefry
+# Formatters and linters, each the latest upstream release at build time: clang-format (the
+# LLVM wheel, newer than Debian's), jsonnet + jsonnetfmt (go-jsonnet), and shellcheck. The
+# go-jsonnet version is read from the releases/latest redirect rather than api.github.com,
+# whose unauthenticated rate limit is low enough to fail a build.
+RUN set -eux; \
+    /opt/venv/bin/pip install --no-cache-dir clang-format; \
+    ver="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+           https://github.com/google/go-jsonnet/releases/latest | sed 's#.*/tag/v##')"; \
+    curl -fsSL -o /tmp/go-jsonnet.tar.gz \
+        "https://github.com/google/go-jsonnet/releases/download/v${ver}/go-jsonnet_${ver}_linux_amd64.tar.gz"; \
+    tar -xzf /tmp/go-jsonnet.tar.gz -C /usr/local/bin jsonnet jsonnetfmt; \
+    chmod 0755 /usr/local/bin/jsonnet /usr/local/bin/jsonnetfmt; \
+    curl -fsSL \
+        https://github.com/koalaman/shellcheck/releases/download/stable/shellcheck-stable.linux.x86_64.tar.xz \
+        | tar -xJ -C /tmp shellcheck-stable/shellcheck; \
+    install -m 0755 /tmp/shellcheck-stable/shellcheck /usr/local/bin/shellcheck; \
+    rm -rf /tmp/go-jsonnet.tar.gz /tmp/shellcheck-stable
 # Launchers for the host-mounted tools (jars/scripts arrive via bind mounts at run time).
 COPY bin/apktool bin/analyzeHeadless bin/ghidraRun /usr/local/bin/
 RUN chmod +x /usr/local/bin/apktool /usr/local/bin/analyzeHeadless /usr/local/bin/ghidraRun
