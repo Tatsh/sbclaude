@@ -148,6 +148,12 @@ def test_expand_paths_missing(tmp_path: Path) -> None:
     assert list(expand_paths([str(tmp_path / 'nope')])) == []
 
 
+def test_expand_paths_glob_skips_dangling_symlink(tmp_path: Path) -> None:
+    (tmp_path / 'dev1').mkdir()
+    (tmp_path / 'dev2').symlink_to(tmp_path / 'gone')
+    assert list(expand_paths([str(tmp_path / 'dev*')])) == [(tmp_path / 'dev1').resolve()]
+
+
 def test_expand_paths_dedupes(tmp_path: Path) -> None:
     target = tmp_path / 'd'
     target.mkdir()

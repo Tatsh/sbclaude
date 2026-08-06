@@ -264,6 +264,112 @@ def test_build_run_argv_android(mocker: MockerFixture, tmp_path: Path) -> None:
     assert f'{tmp_path / ".android"}:{tmp_path / ".android"}' in argv
 
 
+def test_build_run_argv_android_sdk_absent(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ANDROID_SDK_UPDATE_MANAGER_DIR', tmp_path / 'absent-manager')
+    mocker.patch('sbclaude.container.KVM_DEVICE', tmp_path / 'absent-kvm')
+    mocker.patch.dict(os.environ, {'ANDROID_HOME': str(tmp_path / 'absent-sdk')})
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_android=True))
+    assert not any('absent' in arg for arg in argv)
+
+
+def test_build_run_argv_android_update_manager_and_kvm(mocker: MockerFixture,
+                                                       tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    manager = tmp_path / 'sdk-update-manager'
+    manager.mkdir()
+    kvm = tmp_path / 'kvm'
+    kvm.write_text('')
+    mocker.patch('sbclaude.container.ANDROID_SDK_UPDATE_MANAGER_DIR', manager)
+    mocker.patch('sbclaude.container.KVM_DEVICE', kvm)
+    mocker.patch.dict(os.environ, {'ANDROID_HOME': str(tmp_path / 'absent-sdk')})
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_android=True))
+    assert f'{manager}:{manager}:ro' in argv
+    assert argv[argv.index('--device') + 1] == str(kvm)
+    assert argv[argv.index('--group-add') + 1] == str(kvm.stat().st_gid)
+
+
+def test_build_run_argv_pentoo_tools(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    jadx = tmp_path / 'jadx-bin'
+    jadx.mkdir()
+    mocker.patch('sbclaude.container.PENTOO_TOOL_DIRS', (jadx, tmp_path / 'absent-apktool'))
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_re=True))
+    assert f'{jadx}:{jadx}:ro' in argv
+    assert not any('absent' in arg for arg in argv)
+
+
+def test_build_run_argv_ghidra(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    ghidra = tmp_path / 'ghidra'
+    ghidra.mkdir()
+    mocker.patch('sbclaude.container.GHIDRA_DIR', ghidra)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n',
+                                                         use_ghidra=True))
+    assert f'{ghidra}:{ghidra}:ro' in argv
+
+
+def test_build_run_argv_ghidra_absent(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.GHIDRA_DIR', tmp_path / 'absent-ghidra')
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n',
+                                                         use_ghidra=True))
+    assert not any('absent-ghidra' in arg for arg in argv)
+
+
+def test_build_run_argv_usb(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    usb = tmp_path / 'usb'
+    usb.mkdir()
+    mocker.patch('sbclaude.container.USB_DEVICE_DIR', usb)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_usb=True))
+    assert f'{usb}:{usb}' in argv
+
+
+def test_build_run_argv_usb_absent(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.USB_DEVICE_DIR', tmp_path / 'absent-usb')
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_usb=True))
+    assert not any('absent-usb' in arg for arg in argv)
+
+
+def test_build_run_argv_gpu(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    dev = tmp_path / 'nvidia0'
+    dev.write_text('')
+    mocker.patch('sbclaude.container.NVIDIA_DEVICES', (dev, tmp_path / 'absent-nvidiactl'))
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpu=True))
+    assert argv[argv.index('--gpus') + 1] == 'all'
+    assert 'NVIDIA_DRIVER_CAPABILITIES=compute,utility' in argv
+    assert argv[argv.index('--group-add') + 1] == str(dev.stat().st_gid)
+
+
 def test_build_run_argv_ios(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
@@ -734,3 +840,110 @@ def test_build_run_argv_extra_args(mocker: MockerFixture, tmp_path: Path) -> Non
     assert argv[idx + 1] == '256m'
     assert '--read-only' in argv
     assert argv.index(container.IMAGE_BASE) > idx
+
+
+@pytest.mark.parametrize('exc', [AttributeError(), OSError(), ValueError()])
+def test_build_run_argv_memory_auto_unavailable(exc: Exception, mocker: MockerFixture,
+                                                tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.sysconf', side_effect=exc)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n'))
+    assert '--memory' not in argv
+
+
+def test_build_run_argv_memory_auto_tiny_host(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    # A 2 GiB host: the whole reserve is taken, leaving nothing to cap with.
+    mocker.patch('sbclaude.container.os.sysconf',
+                 side_effect=lambda name: {
+                     'SC_PAGE_SIZE': 4096,
+                     'SC_PHYS_PAGES': 524288
+                 }[name])
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n'))
+    assert '--memory' not in argv
+
+
+def test_build_run_argv_legacy_claude_json(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    legacy = tmp_path / '.claude.json'
+    legacy.write_text('{}')
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n'))
+    assert f'{legacy}:{legacy}' in argv
+
+
+def test_build_run_argv_mount_extras_skip_project(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'p'
+    project.mkdir()
+    rw = tmp_path / 'rw'
+    rw.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', ro=[project], rw=[rw]))
+    # The project stays read-write and is not re-mounted read-only.
+    assert f'{project}:{project}:ro' not in argv
+    assert argv.count(f'{project}:{project}') == 1
+    assert f'{rw}:{rw}' in argv
+
+
+def test_build_run_argv_gitconfig_dedupes(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    gitconfig = tmp_path / '.gitconfig'
+    gitconfig.write_text('[user]\n')
+    absent = tmp_path / 'gone.gitconfig'
+    out = (f'file:{gitconfig}\tuser.name=A\n'
+           f'file:{gitconfig}\tuser.email=a@example.com\n'
+           f'file:{absent}\tuser.signingkey=DEADBEEF\n')
+    mocker.patch('sbclaude.container.sp.run', return_value=mocker.MagicMock(stdout=out))
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n'))
+    assert argv.count(f'{gitconfig}:{gitconfig}:ro') == 1
+    assert not any('gone.gitconfig' in arg for arg in argv)
+
+
+def test_build_run_argv_x11_home_cookie(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=4242424)
+    cookie = tmp_path / '.Xauthority'
+    cookie.write_text('x')
+    mocker.patch.dict(os.environ, {'XAUTHORITY': '', 'DISPLAY': ':0'})
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_x11=True))
+    assert f'XAUTHORITY={cookie}' in argv
+
+
+def test_run_custom_image_skips_ensure(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    ensure = mocker.patch('sbclaude.container.ensure_image')
+    completed = mocker.patch('sbclaude.container.sp.run')
+    completed.return_value.returncode = 0
+    project = tmp_path / 'p'
+    project.mkdir()
+    assert container.run(container.RunSpec(project=project, name='n', image='custom:latest')) == 0
+    assert not ensure.called
+    assert completed.call_args[0][0][-1] == 'custom:latest'
+
+
+def test_stop_all(mocker: MockerFixture) -> None:
+    ctr = mocker.MagicMock()
+    ctr.name = 'sbclaude-other-abc123'
+    client = mocker.MagicMock()
+    client.containers.list.return_value = [ctr]
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    assert list(container.stop()) == ['sbclaude-other-abc123']
+    ctr.remove.assert_called_once_with(force=True)
+    assert client.containers.list.call_args.kwargs['filters'] == {'label': 'sbclaude.managed=1'}
