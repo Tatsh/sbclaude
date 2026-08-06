@@ -135,6 +135,7 @@ noninteractive
 norecursedirs
 nosystem
 notarytool
+nullglob
 numpy
 nvidiactl
 onefile
@@ -174,6 +175,7 @@ setuid
 shellcheck
 shellformat
 shntool
+shopt
 signingkey
 signtool
 sigwinch

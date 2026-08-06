@@ -53,6 +53,7 @@
 /mypy-report*/
 /session-recover.yaml
 __pycache__/
+analyzeHeadless
 cobertura.xml
 coverage.xml
 htmlcov/
