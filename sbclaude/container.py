@@ -49,6 +49,20 @@ USBMUXD_SOCKET = Path('/var/run/usbmuxd')
 """Host usbmuxd socket that frida's usbmux backend uses to reach an iOS device."""
 LOCKDOWN_DIR = Path('/var/lib/lockdown')
 """Host lockdownd pairing-records directory, mounted read-only so iOS pairing carries in."""
+GHIDRA_DIR = Path('/usr/share/ghidra')
+"""Host Ghidra installation, mounted read-only when Ghidra is enabled."""
+PENTOO_TOOL_DIRS = (Path('/opt/jadx-bin'), Path('/opt/apktool'))
+"""Host jadx and apktool installations (::pentoo paths), mounted read-only."""
+ANDROID_SDK_DIR = Path('/opt/android-sdk')
+"""Host Android SDK location used when ``ANDROID_HOME`` is unset."""
+ANDROID_SDK_UPDATE_MANAGER_DIR = Path('/opt/android-sdk-update-manager')
+"""Host Android SDK update manager directory (::pentoo path), mounted read-only."""
+KVM_DEVICE = Path('/dev/kvm')
+"""Host KVM device, passed through for Android emulator acceleration."""
+USB_DEVICE_DIR = Path('/dev/bus/usb')
+"""Host USB device tree, exposed for adb over USB."""
+NVIDIA_DEVICES = (Path('/dev/nvidia0'), Path('/dev/nvidiactl'))
+"""Host NVIDIA device nodes whose groups the box joins for GPU access."""
 UV_ENV_PREFIX = '/tmp/sbclaude-uv-'  # noqa: S108
 """Prefix for the container-local uv project environment (keeps it out of the project)."""
 _NAME_SANITIZE = re.compile(r'[^a-zA-Z0-9_.-]')
@@ -315,18 +329,17 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:  # noqa: C90
         if path != spec.project:
             argv += _v(path)
     if spec.use_re or spec.use_android:
-        # These are ::pentoo paths.
-        for tool in (Path('/opt/jadx-bin'), Path('/opt/apktool')):
+        for tool in PENTOO_TOOL_DIRS:
             if tool.is_dir():
                 argv += _v(tool, ro=True)
-    if spec.use_ghidra and Path('/usr/share/ghidra').is_dir():
-        argv += _v('/usr/share/ghidra', ro=True)
+    if spec.use_ghidra and GHIDRA_DIR.is_dir():
+        argv += _v(GHIDRA_DIR, ro=True)
     if spec.use_gpu:
         argv += _gpu_args()
     if spec.use_android:
         argv += _android_args(home)
-    if spec.use_usb and Path('/dev/bus/usb').is_dir():
-        argv += _v('/dev/bus/usb')
+    if spec.use_usb and USB_DEVICE_DIR.is_dir():
+        argv += _v(USB_DEVICE_DIR)
     if spec.use_ios:
         argv += _ios_args()
     if spec.use_ssh:
@@ -343,22 +356,22 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:  # noqa: C90
 
 def _gpu_args() -> list[str]:
     args = ['--gpus', 'all', '-e', 'NVIDIA_DRIVER_CAPABILITIES=compute,utility']
-    for dev in (Path('/dev/nvidia0'), Path('/dev/nvidiactl')):
+    for dev in NVIDIA_DEVICES:
         if dev.exists():
             args += ['--group-add', str(dev.stat().st_gid)]
     return args
 
 
 def _android_args(home: Path) -> Iterator[str]:
-    sdk = Path(os.environ.get('ANDROID_HOME', '/opt/android-sdk'))
+    sdk = Path(os.environ.get('ANDROID_HOME', str(ANDROID_SDK_DIR)))
     if sdk.is_dir():
         yield from _v(sdk, ro=True)
-    if Path('/opt/android-sdk-update-manager').is_dir():
-        yield from _v('/opt/android-sdk-update-manager', ro=True)
+    if ANDROID_SDK_UPDATE_MANAGER_DIR.is_dir():
+        yield from _v(ANDROID_SDK_UPDATE_MANAGER_DIR, ro=True)
     if (d := home / '.android').is_dir():
         yield from _v(d)
-    if (kvm := Path('/dev/kvm')).exists():
-        yield from ('--device', '/dev/kvm', '--group-add', str(kvm.stat().st_gid))
+    if KVM_DEVICE.exists():
+        yield from ('--device', str(KVM_DEVICE), '--group-add', str(KVM_DEVICE.stat().st_gid))
 
 
 def _ios_args() -> list[str]:
