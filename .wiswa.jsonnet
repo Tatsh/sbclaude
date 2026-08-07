@@ -5,7 +5,7 @@ local utils = import 'utils.libjsonnet';
   description: 'Run Claude Code in a throwaway Docker container.',
   keywords: ['android', 'claude', 'docker', 'ghidra', 'reverse engineering', 'sandbox'],
   project_name: 'sbclaude',
-  version: '0.0.0',
+  version: '0.0.1',
   want_main: true,
   want_flatpak: true,
   publishing+: { flathub: 'sh.tat.sbclaude' },

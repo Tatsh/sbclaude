@@ -1,0 +1,304 @@
+.\" Man page generated from reStructuredText.
+.
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.TH "SBCLAUDE" "1" "Aug 07, 2026" "0.0.1" "sbclaude"
+.SH NAME
+sbclaude \- sbclaude v0.0.1
+.sp
+Run Claude Code in a throwaway Docker container with no sandbox and no permission prompts, against configurable host mounts, with an optional mobile reverse\-engineering toolchain.
+.SH COMMANDS
+.SS sbclaude
+.sp
+Run Claude Code in a throwaway Docker container (no sandbox, no prompts).
+.sp
+With no subcommand, behaves like \fIsbclaude run\fP using config defaults.
+.sp
+Usage
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+sbclaude [OPTIONS] [COMMAND] [ARGS]...
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+Options
+.INDENT 0.0
+.TP
+.B \-\-version
+Show the version and exit.
+.UNINDENT
+.SS build
+.sp
+Build the sbclaude Docker image from the packaged Dockerfile.
+.sp
+Usage
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+sbclaude build [OPTIONS]
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+Options
+.INDENT 0.0
+.TP
+.B \-\-no\-cache
+Build without the cache.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-debian\-mirror <debian_mirror>
+Debian archive mirror to bake into the image, e.g. \X'tty: link http://ftp.us.debian.org/debian'\fI\%http://ftp.us.debian.org/debian\fP\X'tty: link'\&.
+.UNINDENT
+.SS config
+.sp
+Print the config file path and whether it exists.
+.sp
+Usage
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+sbclaude config [OPTIONS]
+.EE
+.UNINDENT
+.UNINDENT
+.SS delete\-image
+.sp
+Delete the sbclaude Docker images.
+.sp
+Usage
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+sbclaude delete\-image [OPTIONS]
+.EE
+.UNINDENT
+.UNINDENT
+.SS ls
+.sp
+List running sbclaude containers.
+.sp
+Usage
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+sbclaude ls [OPTIONS]
+.EE
+.UNINDENT
+.UNINDENT
+.SS run
+.sp
+Launch claude in a fresh container. Args after \fB\-\-\fP pass through to claude.
+.sp
+Usage
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+sbclaude run [OPTIONS] [CLAUDE_ARGS]...
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+Options
+.INDENT 0.0
+.TP
+.B \-p, \-\-project <project>
+Project dir (read\-write, becomes the workdir). Default: cwd.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-w, \-\-rw <rw_extra>
+Extra read\-write mount.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-r, \-\-ro <ro_extra>
+Extra read\-only mount.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-n, \-\-name <name>
+Container name (default: sbclaude\-<project>).
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-i, \-\-image <image>
+Image override.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-debian\-mirror <debian_mirror>
+Debian archive mirror to bake in if the image is (re)built, e.g. \X'tty: link http://ftp.us.debian.org/debian'\fI\%http://ftp.us.debian.org/debian\fP\X'tty: link'\&.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-memory <memory>
+Docker memory limit, e.g. 8g. Default auto\-caps from host RAM; \(aq0\(aq disables. Only applied when hardening is on.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-cpus <cpus>
+Docker CPU limit, e.g. 4. Only applied when hardening is on.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-R, \-\-re
+Enable the Ghidra and Android host mounts together.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-ghidra
+Mount host Ghidra (read\-only).
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-gpu
+Expose the host GPUs.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-android
+Mount Android SDK + ~/.android + kvm.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-usb
+Expose /dev/bus/usb for adb.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-ios
+Mount the host usbmuxd socket so frida can reach an iOS device.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-x11
+Forward DISPLAY + XAUTHORITY for GUIs.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-ssh
+Mount the host ~/.ssh read\-only and forward the ssh\-agent for SSH git remotes.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-gpg
+Mount the host GnuPG home and agent socket for signing commits.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-net <network>
+Docker network mode (default: host; use \(dqbridge\(dq to isolate).
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-e, \-\-env <env_extra>
+Extra env var KEY=VALUE for the box, e.g. \-e CLAUDE_CODE_USE_BEDROCK=1.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-no\-harden
+Disable the container hardening flags (cap\-drop, no\-new\-privileges, ...).
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-session\-recover
+Install cc\-session\-recover (auto\-resume) into the project on start.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-d, \-\-debug
+Enable debug level logging.
+.UNINDENT
+.sp
+Arguments
+.INDENT 0.0
+.TP
+.B CLAUDE_ARGS
+Optional argument(s)
+.UNINDENT
+.SS shell
+.sp
+Open a root debug shell inside a running box.
+.sp
+Usage
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+sbclaude shell [OPTIONS]
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+Options
+.INDENT 0.0
+.TP
+.B \-n, \-\-name <name>
+Container name. Default: the current project\(aqs box.
+.UNINDENT
+.SS stop
+.sp
+Stop running boxes (every box for the current project by default).
+.sp
+Usage
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+sbclaude stop [OPTIONS]
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+Options
+.INDENT 0.0
+.TP
+.B \-n, \-\-name <name>
+Container name. Default: every box for the current project.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-all
+Stop every sbclaude container.
+.UNINDENT
+.SH AUTHOR
+Andrew Udvare <audvare@gmail.com>
+.SH COPYRIGHT
+2026
+.\" Generated by docutils manpage writer.
+.
