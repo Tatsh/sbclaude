@@ -8,7 +8,7 @@ apps:
 base: 'core24'
 confinement: 'strict'
 contact: 'https://github.com/Tatsh/sbclaude/issues'
-description: 'Run Claude Code in a throwaway Docker container with no sandbox and no permission prompts, against configurable host mounts, with an optional mobile reverse-engineering toolchain.'
+description: 'Run Claude Code in a throwaway Docker container.'
 donation: 'https://buymeacoffee.com/Tatsh'
 grade: 'stable'
 issues: 'https://github.com/Tatsh/sbclaude/issues'
@@ -28,7 +28,7 @@ platforms:
   arm64:
     build-on: 'arm64'
 source-code: 'https://github.com/Tatsh/sbclaude'
-summary: 'Run Claude Code in a throwaway Docker container with no sandbox and no permission prompts, against configurable host mounts, with an optional mobile reverse-engineering toolchain.'
+summary: 'Run Claude Code in a throwaway Docker container.'
 title: 'sbclaude'
-version: '0.0.1'
+version: '0.0.0'
 website: 'https://tatsh.github.io/sbclaude/'

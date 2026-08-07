@@ -7,7 +7,7 @@ dev = [
   "commitizen>=4.17.0",
   "cz-path>=0.0.7",
   "mypy>=2.3.0",
-  "ruff==0.16.0",
+  "ruff==0.16.1",
   "ty>=0.0.65",
   "types-docker>=7.2.0.20260728",
   "yapf>=0.43.0",
@@ -51,13 +51,13 @@ dependencies = [
   "tomlkit>=0.15.1",
   "typing-extensions>=4.16.0",
 ]
-description = "Run Claude Code in a throwaway Docker container with no sandbox and no permission prompts, against configurable host mounts, with an optional mobile reverse-engineering toolchain."
-keywords = ["android", "claude", "docker", "ghidra", "reverse-engineering", "sandbox"]
+description = "Run Claude Code in a throwaway Docker container."
+keywords = ["android", "claude", "docker", "ghidra", "reverse engineering", "sandbox"]
 license = "MIT"
 name = "sbclaude"
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
-version = "0.0.1"
+version = "0.0.0"
 
 [[project.authors]]
 email = "audvare@gmail.com"

@@ -53,11 +53,8 @@
 /mypy-report*/
 /session-recover.yaml
 __pycache__/
-analyzeHeadless
-apktool
 cobertura.xml
 coverage.xml
-ghidraRun
 htmlcov/
 mypy-report.xml
 node_modules/

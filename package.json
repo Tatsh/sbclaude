@@ -1,8 +1,8 @@
 {
   "_wiswa": {
-    "commandLine": "wiswa -d",
-    "lastRun": "2026-08-05T09:30:16Z",
-    "version": "81c4230"
+    "commandLine": "wiswa",
+    "lastRun": "2026-08-07T02:39:14Z",
+    "version": "d9405fd"
   },
   "contributors": ["Andrew Udvare <audvare@gmail.com>"],
   "cspell": {
@@ -39,7 +39,7 @@
     ],
     "useGitignore": true
   },
-  "description": "Run Claude Code in a throwaway Docker container with no sandbox and no permission prompts, against configurable host mounts, with an optional mobile reverse-engineering toolchain.",
+  "description": "Run Claude Code in a throwaway Docker container.",
   "devDependencies": {
     "@prettier/plugin-xml": "^3.4.2",
     "cspell": "^10.0.1",
@@ -52,7 +52,7 @@
   },
   "files": ["LICENSE.txt", "README.md", "man/sbclaude.1"],
   "homepage": "https://tatsh.github.io/sbclaude/",
-  "keywords": ["android", "claude", "docker", "ghidra", "reverse-engineering", "sandbox"],
+  "keywords": ["android", "claude", "docker", "ghidra", "reverse engineering", "sandbox"],
   "license": "MIT",
   "markdownlint-cli2": {
     "config": {
@@ -118,5 +118,5 @@
     "test:cov": "yarn test --cov . --cov-branch --cov-report html --cov-report term-missing:skip-covered",
     "ty": "uv run ty check"
   },
-  "version": "0.0.1"
+  "version": "0.0.0"
 }
