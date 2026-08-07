@@ -1,4 +1,4 @@
-# claude-box
+# sbclaude
 
 <!-- WISWA-GENERATED-README:START -->
 
