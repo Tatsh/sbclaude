@@ -14,9 +14,6 @@ Commands
 
 .. only:: html
 
-   .. automodule:: sbclaude.utils
-      :members:
-
    Indices and tables
    ==================
    * :ref:`genindex`
