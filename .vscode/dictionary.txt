@@ -8,7 +8,6 @@ appimage
 appinfo
 asyncio
 autodoc
-automodule
 autoupdater
 autouse
 avdmanager
@@ -44,7 +43,6 @@ docstrings
 doctree
 doctrees
 dunder
-eacces
 eeyore
 elif
 enoent
@@ -91,6 +89,8 @@ launchable
 lextudio
 libao
 libasound
+libatk
+libatspi
 libcairo
 libera
 libfontconfig
