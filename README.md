@@ -38,7 +38,8 @@ invoke `sbclaude` — it manages its own image and containers via the Docker SDK
 There is a single image, `sbclaude`, built on demand. It bundles everyday coding tools
 (Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv, jq), formatters and
 linters kept at their latest upstream release (clang-format, jsonnet, jsonnetfmt, shellcheck), Qt 6
-development (`qt6-base-dev` plus ninja), and a mobile reverse-engineering toolchain (a JDK,
+development (`qt6-base-dev` plus ninja), `webshot` (a GPU Chrome driver for screenshots and
+visual diffs, with Chromium baked in), and a mobile reverse-engineering toolchain (a JDK,
 frida, mitmproxy, dex2jar, baksmali/smali, and launchers for the host-mounted Ghidra,
 Android SDK, jadx, and apktool).
 
@@ -83,6 +84,25 @@ sbclaude build [--no-cache]       # (re)build the image
 sbclaude delete-image             # remove the sbclaude image
 sbclaude config                   # show the config file path
 ```
+
+### `webshot`
+
+Inside the box, `webshot` drives a real GPU-accelerated Chromium (baked into the image, so no
+project needs its own browser download), screenshots it, and compares the result against a
+baseline. It is deliberately generic: it knows about browsers, waiting, settling, screenshots, and
+image comparison, and nothing about any particular application — per-project knowledge is supplied
+with `--wait-fn`/`--eval`.
+
+```sh
+webshot doctor                                          # report the renderer actually in use
+webshot shot http://localhost:3000 --out out.png --wait '#app'
+webshot check http://localhost:3000 --baseline base.png
+webshot compare a.png b.png --diff d.png
+```
+
+Exit codes: `0` ok, `1` regression, `2` software renderer (i.e. the GPU is not really being used),
+`3` missing baseline, `64` usage. Pair it with `--gpu`, and with `--wayland` when a headed window
+is wanted.
 
 You can run **several boxes against the same project directory at once**. Each `run` gets a
 unique container name — the project name plus a short random suffix — so there is no name

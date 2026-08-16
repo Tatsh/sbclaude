@@ -16,6 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cookie granting access to the whole session.
 - `--gpu` now also passes through the DRM render nodes (`/dev/dri/renderD*`), so Mesa on
   AMD/Intel and Vulkan/VA-API work, not only CUDA.
+- `webshot`, a GPU-accelerated Chromium screenshot and visual-diff tool, is installed in the
+  image with Chromium baked in, so no project needs a per-repo browser download.
 
 ### Fixed
 

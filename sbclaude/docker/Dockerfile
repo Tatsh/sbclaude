@@ -154,6 +154,20 @@ RUN set -eux; \
         | tar -xJ -C /tmp shellcheck-stable/shellcheck; \
     install -m 0755 /tmp/shellcheck-stable/shellcheck /usr/local/bin/shellcheck; \
     rm -rf /tmp/go-jsonnet.tar.gz /tmp/shellcheck-stable
+# webshot: GPU browser screenshots and visual diffs, available in every box.
+# Chromium and its headless shell are baked in at build time (PLAYWRIGHT_BROWSERS_PATH) so no
+# project needs a per-repo browser download. `playwright install-deps` is not used: the runtime
+# libraries it wants are already present from the Qt/X11 blocks above.
+COPY webshot /opt/webshot
+RUN set -eux; \
+    cd /opt/webshot; \
+    npm install --omit=dev --no-audit --no-fund; \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
+        npx playwright install chromium chromium-headless-shell; \
+    chmod +x /opt/webshot/webshot.mjs; \
+    ln -sf /opt/webshot/webshot.mjs /usr/local/bin/webshot; \
+    chmod -R a+rX /opt/playwright /opt/webshot
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 # Launchers for the host-mounted tools (jars/scripts arrive via bind mounts at run time).
 COPY bin/apktool bin/analyzeHeadless bin/ghidraRun /usr/local/bin/
 RUN chmod +x /usr/local/bin/apktool /usr/local/bin/analyzeHeadless /usr/local/bin/ghidraRun

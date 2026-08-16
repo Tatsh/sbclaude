@@ -1,0 +1,11 @@
+{
+  "bin": { "webshot": "./webshot.mjs" },
+  "dependencies": {
+    "playwright": "^1.56.0"
+  },
+  "description": "Drive a GPU-accelerated Chrome, take screenshots, and diff them.",
+  "name": "webshot",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0"
+}
