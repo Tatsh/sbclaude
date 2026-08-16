@@ -83,6 +83,7 @@ sbclaude shell                    # root debug shell in this project's box
 sbclaude build [--no-cache]       # (re)build the image
 sbclaude delete-image             # remove the sbclaude image
 sbclaude config                   # show the config file path
+sbclaude scaffold-noclip [DIR]    # write a noclip visual-regression harness into a project
 ```
 
 ### `webshot`
@@ -103,6 +104,27 @@ webshot compare a.png b.png --diff d.png
 Exit codes: `0` ok, `1` regression, `2` software renderer (i.e. the GPU is not really being used),
 `3` missing baseline, `64` usage. Pair it with `--gpu`, and with `--wayland` when a headed window
 is wanted.
+
+### `scaffold-noclip`
+
+Writes the project-side glue for a visual-regression workflow built on the `webshot` tool that
+ships in the image, into `DIR` (default: the current directory):
+
+```text
+viewer-tests/nc.mjs        runner -- talks only to the app's own API, copied verbatim per project
+viewer-tests/views.json    the only file you edit: which scene, and where the camera goes
+viewer-tests/baselines/    approved output; effectively source, nothing can regenerate it
+viewer-tests/out/          captures and diffs, rewritten every run
+NEW_GAME.md                getting-started guide, including the non-obvious failure modes
+```
+
+```sh
+sbclaude scaffold-noclip --scene MyGame/Level1   # substitute the scene id while writing
+sbclaude scaffold-noclip ~/dev/foo --force       # overwrite existing files
+```
+
+Existing files are never overwritten without `--force`: an edited `views.json` or a blessed
+baseline is judgement that cannot be regenerated.
 
 You can run **several boxes against the same project directory at once**. Each `run` gets a
 unique container name — the project name plus a short random suffix — so there is no name

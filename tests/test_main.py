@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from sbclaude import container
 from sbclaude.config import Config
 from sbclaude.main import main
+from sbclaude.scaffold import ScaffoldResult
 
 if TYPE_CHECKING:
     from click.testing import CliRunner
@@ -373,3 +374,47 @@ def test_delete_image(runner: CliRunner, mocker: MockerFixture) -> None:
 def test_delete_image_none(runner: CliRunner, mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.main.container.delete_images', return_value=[])
     assert 'No sbclaude images' in runner.invoke(main, ['delete-image']).output
+
+
+def test_scaffold_noclip(runner: CliRunner, mocker: MockerFixture, tmp_path: Path) -> None:
+    written = [tmp_path / 'viewer-tests' / 'nc.mjs', tmp_path / 'NEW_GAME.md']
+    scaffold = mocker.patch('sbclaude.main.scaffold', return_value=ScaffoldResult(written=written))
+    result = runner.invoke(main, ['scaffold-noclip', str(tmp_path)])
+    assert result.exit_code == 0
+    assert scaffold.call_args[0] == (tmp_path, 'noclip')
+    assert scaffold.call_args[1] == {'force': False, 'scene': None}
+    assert f'created {tmp_path / "viewer-tests" / "nc.mjs"}' in result.output
+    assert 'Next: start your dev server' in result.output
+
+
+def test_scaffold_noclip_skips_existing(runner: CliRunner, mocker: MockerFixture,
+                                        tmp_path: Path) -> None:
+    skipped = [tmp_path / 'viewer-tests' / 'views.json']
+    mocker.patch('sbclaude.main.scaffold', return_value=ScaffoldResult(skipped=skipped))
+    result = runner.invoke(main, ['scaffold-noclip', str(tmp_path)])
+    assert result.exit_code == 0
+    assert f'exists, left alone: {skipped[0]}' in result.output
+    assert 'Re-run with --force' in result.output
+    # Nothing was written, so the next-step hint would be misleading.
+    assert 'Next: start your dev server' not in result.output
+
+
+def test_scaffold_noclip_scene_and_force(runner: CliRunner, mocker: MockerFixture,
+                                         tmp_path: Path) -> None:
+    scaffold = mocker.patch('sbclaude.main.scaffold', return_value=ScaffoldResult())
+    runner.invoke(main, ['scaffold-noclip', str(tmp_path), '--scene', 'MyGame/Level1', '--force'])
+    assert scaffold.call_args[1] == {'force': True, 'scene': 'MyGame/Level1'}
+
+
+def test_scaffold_noclip_defaults_to_cwd(runner: CliRunner, mocker: MockerFixture) -> None:
+    scaffold = mocker.patch('sbclaude.main.scaffold', return_value=ScaffoldResult())
+    runner.invoke(main, ['scaffold-noclip'])
+    assert scaffold.call_args[0][0] == Path.cwd()
+
+
+def test_scaffold_noclip_os_error(runner: CliRunner, mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.main.scaffold', side_effect=OSError('read-only file system'))
+    result = runner.invoke(main, ['scaffold-noclip', str(tmp_path)])
+    assert result.exit_code != 0
+    assert 'read-only file system' in result.output
+    assert not isinstance(result.exception, OSError)

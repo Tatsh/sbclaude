@@ -10,6 +10,7 @@ import click
 
 from . import container
 from .config import Config, config_path, expand_paths, load_config
+from .scaffold import scaffold
 
 __all__ = ('main',)
 
@@ -277,3 +278,31 @@ def config_cmd() -> None:
     """Print the config file path and whether it exists."""
     path = config_path()
     click.echo(f'{path} ({"exists" if path.is_file() else "not created yet"})')
+
+
+@main.command(name='scaffold-noclip')
+@click.option('-f', '--force', is_flag=True, help='Overwrite files that already exist.')
+@click.option('-s', '--scene', help='Scene id for the generated config, e.g. MyGame/Level1.')
+@click.argument('target', required=False, type=click.Path(file_okay=False, path_type=Path))
+def scaffold_noclip(target: Path | None, scene: str | None, *, force: bool) -> None:
+    """
+    Scaffold a noclip visual-regression harness into TARGET (default: the current directory).
+
+    Writes viewer-tests/ (glue, config, baselines/, out/) plus a getting-started guide. The
+    ``webshot`` tool it drives is already installed in the box. Other harnesses, if they are ever
+    added, get their own ``scaffold-<kind>`` command rather than a flag on this one.
+    """  # noqa: DOC501
+    target = target or Path.cwd()
+    try:
+        result = scaffold(target, 'noclip', scene=scene, force=force)
+    except OSError as e:
+        raise click.ClickException(str(e)) from e
+    for path in result.written:
+        click.echo(f'created {path}')
+    for path in result.skipped:
+        click.echo(f'exists, left alone: {path}')
+    if result.skipped:
+        click.echo('Re-run with --force to overwrite.', err=True)
+    if result.written:
+        click.echo('\nNext: start your dev server, then '
+                   f'`cd {target / "viewer-tests"} && ./nc.mjs watch overview`')

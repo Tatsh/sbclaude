@@ -18,6 +18,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   AMD/Intel and Vulkan/VA-API work, not only CUDA.
 - `webshot`, a GPU-accelerated Chromium screenshot and visual-diff tool, is installed in the
   image with Chromium baked in, so no project needs a per-repo browser download.
+- `scaffold-noclip` writes a project-side visual-regression harness (`viewer-tests/`, baselines,
+  and a getting-started guide) driving `webshot`. Existing files are never overwritten without
+  `--force`.
 
 ### Fixed
 

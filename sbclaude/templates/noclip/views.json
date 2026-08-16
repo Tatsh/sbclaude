@@ -1,0 +1,33 @@
+{
+  "_antialiasingNote": "AntialiasingMode: 0=None, 1=FXAA (noclip default), 2=MSAAx4. Pinned purely so two runs are comparable -- the value lives in localStorage, not in the code, so an unpinned baseline would diff against another browser profile for reasons unrelated to any change.",
+
+  "_comment": [
+    "Project-specific config for the generic `webshot` tool. Everything about browsers, GPU,",
+    "waiting, settling and diffing lives in webshot; nc.mjs knows about noclip; this file is",
+    "the only part that is specific to a game.",
+    "",
+    "A view is one of:",
+    "  saveState   a noclip share-link ShareData string -- easiest to author: run",
+    "              `./nc.mjs watch <view>`, fly to a good spot, copy the `;ShareData=...`",
+    "              out of the URL bar. Needs nothing from the scene code.",
+    "  eye+target  explicit coordinates, from `./nc.mjs where`",
+    "  fitScene    derive the camera from the scene's worldBounds; survives changes to the",
+    "              importer's scale or origin, but the scene must publish worldBounds",
+    "",
+    "`reference` is real-game footage: reported, never gating. Only blessed baselines gate,",
+    "because a WebGL re-implementation is never pixel-equal to captured hardware footage."
+  ],
+
+  "antialiasing": 2,
+  "base": "http://127.0.0.1:8124",
+  "scene": "@SCENE@",
+  "threshold": 0.02,
+
+  "views": {
+    "overview": {
+      "_todo": "Replace with a real camera. Fastest route: ./nc.mjs watch overview, fly somewhere good, copy the ShareData out of the URL, and put it here as \"saveState\".",
+      "fit": { "azimuth": 0.9, "elevation": 0.45, "margin": 0.42 },
+      "fitScene": true
+    }
+  }
+}
