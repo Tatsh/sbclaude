@@ -270,11 +270,13 @@ Opt in per run, or globally with `ssh = true` and `gpg = true` under `[tool.sbcl
   repository has its target mounted read-only at the same path, so the link does not dangle
   and every `Host` alias keeps working.
 - `--gpg` bind-mounts the host **GnuPG home** (read-write — `gpg` needs to write lock files
-  and the trustdb) and overlays the host's live **gpg-agent socket** at `~/.gnupg/S.gpg-agent`.
-  The host agent performs the signing and owns the secret keys, so a cached passphrase carries
-  over and any pinentry prompt appears on the host. The image ships `gnupg` and
-  `openssh-client`; your mounted `~/.gitconfig` (with `user.signingkey`/`commit.gpgsign`) does
-  the rest.
+  and the trustdb) and overlays the host's live **gpg-agent socket** at both of the places the
+  box's `gpg` may look for it: `~/.gnupg/S.gpg-agent` and `/run/user/<uid>/gnupg/S.gpg-agent`.
+  Which one applies depends on whether `/run/user/<uid>` exists in the box, and `--wayland` and
+  `--ssh` both make it exist, so both are mounted rather than guessed. The host agent performs
+  the signing and owns the secret keys, so a cached passphrase carries over and any pinentry
+  prompt appears on the host. The image ships `gnupg` and `openssh-client`; your mounted
+  `~/.gitconfig` (with `user.signingkey`/`commit.gpgsign`) does the rest.
 
 ```sh
 sbclaude run --ssh --gpg -p ~/dev/foo   # inside: git push, git commit -S both work

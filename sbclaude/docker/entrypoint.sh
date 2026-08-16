@@ -111,6 +111,14 @@ if [ -d "$RUNTIME_DIR" ]; then
     chmod 700 "$RUNTIME_DIR" 2>/dev/null || true
 fi
 
+# The forwarded gpg-agent socket lands in a gnupg subdirectory that Docker likewise creates as
+# root:root 0755. GnuPG requires its socket directory to be owned by the user, so give it the
+# same treatment. Directory only, for the same reason as above.
+if [ -d "$RUNTIME_DIR/gnupg" ]; then
+    chown "$HOST_UID:$HOST_GID" "$RUNTIME_DIR/gnupg" 2>/dev/null || true
+    chmod 700 "$RUNTIME_DIR/gnupg" 2>/dev/null || true
+fi
+
 # The host config records installMethod=native, so claude expects its own binary at
 # ~/.local/bin/claude. We bind-mount it at /usr/local/bin/claude instead, so create the expected
 # symlink to silence the "claude command not found at ~/.local/bin/claude" warning.

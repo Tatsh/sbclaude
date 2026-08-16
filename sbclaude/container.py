@@ -347,7 +347,7 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         (spec.use_usb and USB_DEVICE_DIR.is_dir(), lambda: _v(USB_DEVICE_DIR)),
         (spec.use_ios, _ios_args),
         (spec.use_ssh, lambda: _ssh_args(home)),
-        (spec.use_gpg, lambda: _gpg_args(home)),
+        (spec.use_gpg, lambda: _gpg_args(home, uid)),
         (spec.use_wayland, lambda: _wayland_args(uid)),
         (spec.use_x11, lambda: _x11_args(uid, user)),
     )
@@ -468,22 +468,32 @@ def _gpg_agent_socket() -> Path | None:
     return Path(out) if out else None
 
 
-def _gpg_args(home: Path) -> list[str]:
+def _gpg_args(home: Path, uid: int) -> list[str]:
     # Mount the host GnuPG home (read-write: gpg needs to write lock files and the
     # trustdb) so the container's gpg sees the same keyrings, then bridge to the host's
-    # running gpg-agent for the actual signing. The agent socket often lives outside the
-    # home (e.g. /run/user/<uid>/gnupg); the container's gpg, lacking a usable
-    # /run/user/<uid>, looks for it at <GNUPGHOME>/S.gpg-agent, so overlay the live host
-    # socket there.
+    # running gpg-agent for the actual signing.
+    #
+    # The agent socket usually lives outside the home, and where the box's gpg looks for it
+    # depends on whether /run/user/<uid> is there and usable: with it, the socket directory
+    # is /run/user/<uid>/gnupg, and without it gpg falls back to <GNUPGHOME>/S.gpg-agent.
+    # Which of the two applies is not ours to predict -- --wayland and --ssh both forward a
+    # socket into /run/user/<uid>, which makes Docker create it and the entrypoint chown it
+    # to the user -- so overlay the live host socket at both paths. The unused one costs a
+    # bind mount and nothing else, whereas guessing wrong costs the ability to sign: gpg does
+    # not report a missing agent, it silently starts its own inside the box, and that one can
+    # only reach pinentry-curses, which needs a TTY the box does not have.
     homedir = Path(os.environ.get('GNUPGHOME') or home / '.gnupg')
     if not homedir.is_dir():
         return []
     args = list(_v(homedir))
     if os.environ.get('GNUPGHOME'):
         args += ['-e', f'GNUPGHOME={homedir}']
-    if (socket := _gpg_agent_socket()) and socket.is_socket() \
-            and not socket.is_relative_to(homedir):
-        args += _v(socket, homedir / 'S.gpg-agent')
+    if (socket := _gpg_agent_socket()) and socket.is_socket():
+        if not socket.is_relative_to(homedir):
+            args += _v(socket, homedir / 'S.gpg-agent')
+        runtime_socket = Path(f'/run/user/{uid}/gnupg/S.gpg-agent')
+        if socket != runtime_socket:
+            args += _v(socket, runtime_socket)
     return args
 
 

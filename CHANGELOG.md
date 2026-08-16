@@ -24,6 +24,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `--gpg` could no longer sign once `/run/user/<uid>` existed in the box, which `--wayland` and
+  `--ssh` both arrange. The agent socket was overlaid only at `~/.gnupg/S.gpg-agent`, the path
+  `gpg` falls back to when it has no usable runtime directory; with one, it looks in
+  `/run/user/<uid>/gnupg` instead, found nothing, and silently started its own agent inside the
+  box, which can only reach `pinentry-curses` and so failed with "Inappropriate ioctl for device"
+  on a TTY-less box. The socket is now overlaid at both paths.
 - `--gpu` left the GPU unusable: the supplementary device groups Docker granted were dropped when
   the entrypoint switched to the mapped user, and the driver capability set omitted `graphics`, so
   anything that rendered silently fell back to software.

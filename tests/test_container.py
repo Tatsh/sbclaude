@@ -577,6 +577,42 @@ def test_build_run_argv_gpg(mocker: MockerFixture, tmp_path: Path) -> None:
     assert f'{sock}:{gnupg / "S.gpg-agent"}' in argv
 
 
+def test_build_run_argv_gpg_bridges_the_runtime_socket_too(mocker: MockerFixture,
+                                                           tmp_path: Path) -> None:
+    # Where the box's gpg looks depends on whether /run/user/<uid> is usable there, which
+    # --wayland and --ssh both arrange, so the socket has to be bridged at both paths.
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'GNUPGHOME': ''})
+    (tmp_path / '.gnupg').mkdir()
+    sock = tmp_path / 'run' / 'S.gpg-agent'
+    mocker.patch('sbclaude.container.sp.run', return_value=mocker.MagicMock(stdout=f'{sock}\n'))
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpg=True))
+    assert f'{sock}:/run/user/{os.getuid()}/gnupg/S.gpg-agent' in argv
+
+
+def test_build_run_argv_gpg_socket_already_at_the_runtime_path(mocker: MockerFixture,
+                                                               tmp_path: Path) -> None:
+    # The usual host layout: the socket is already where the box will look, so it is mounted
+    # over the home fallback only and never onto itself.
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'GNUPGHOME': ''})
+    gnupg = tmp_path / '.gnupg'
+    gnupg.mkdir()
+    sock = Path(f'/run/user/{os.getuid()}/gnupg/S.gpg-agent')
+    mocker.patch('sbclaude.container.sp.run', return_value=mocker.MagicMock(stdout=f'{sock}\n'))
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpg=True))
+    assert f'{sock}:{gnupg / "S.gpg-agent"}' in argv
+    assert f'{sock}:{sock}' not in argv
+
+
 def test_build_run_argv_gpg_socket_in_home(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
