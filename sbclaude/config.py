@@ -95,6 +95,8 @@ class Config:
     """Whether to mount the host ``~/.ssh`` read-only and forward the ssh-agent socket."""
     usb: bool = False
     """Whether to expose ``/dev/bus/usb`` for adb over USB."""
+    wayland: bool = False
+    """Whether to forward the Wayland compositor socket."""
     x11: bool = False
     """Whether to forward X11 ``DISPLAY`` and ``XAUTHORITY``."""
 
@@ -160,6 +162,7 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   rw=_str_list(data.get('rw')),
                   ssh=bool(data.get('ssh', False)),
                   usb=bool(data.get('usb', False)),
+                  wayland=bool(data.get('wayland', False)),
                   x11=bool(data.get('x11', False)))
 
 

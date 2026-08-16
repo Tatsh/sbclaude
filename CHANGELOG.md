@@ -9,6 +9,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
 
+### Added
+
+- `--wayland` (config key `wayland`) forwards the host compositor socket into the box, re-homed
+  under the container's own `XDG_RUNTIME_DIR`. Preferred over `--x11`, which hands the box a
+  cookie granting access to the whole session.
+- `--gpu` now also passes through the DRM render nodes (`/dev/dri/renderD*`), so Mesa on
+  AMD/Intel and Vulkan/VA-API work, not only CUDA.
+
+### Fixed
+
+- `--gpu` left the GPU unusable: the supplementary device groups Docker granted were dropped when
+  the entrypoint switched to the mapped user, and the driver capability set omitted `graphics`, so
+  anything that rendered silently fell back to software.
+- The glvnd, Vulkan, and GBM manifests the NVIDIA container toolkit does not install are now
+  synthesised at start-up, so GL, EGL, and Vulkan clients find the real driver.
+- `~/.config` is no longer left root-owned when something is mounted beneath it, which had made
+  Chrome abort at start-up.
+
 ## [0.0.1] - 2026-08-07
 
 First release.

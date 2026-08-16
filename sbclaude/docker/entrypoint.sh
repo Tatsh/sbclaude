@@ -39,10 +39,77 @@ fi
 USER_NAME="$(getent passwd "$HOST_UID" | cut -d: -f1)"
 USER_NAME="${USER_NAME:-$HOST_USER}"
 
+# Carry over the supplementary groups Docker granted with --group-add (GPU/video/render/kvm
+# device nodes). Those are granted to PID 1; `gosu uid:gid` sets the group list to EXACTLY that
+# one primary group and silently drops them, which is why --gpus alone leaves /dev/nvidia*
+# unreadable ("Failed to initialize NVML: Insufficient Permissions"). Re-add them to the user so
+# the later `gosu "$HOST_UID"` (user only) picks up the full list from /etc/group.
+for _gid in $(id -G); do
+    if [ "$_gid" != '0' ] && [ "$_gid" != "$HOST_GID" ]; then
+        if ! getent group "$_gid" >/dev/null 2>&1; then
+            groupadd -g "$_gid" "hostgid$_gid" >/dev/null 2>&1 || true
+        fi
+        _gname="$(getent group "$_gid" | cut -d: -f1 || true)"
+        if [ -n "$_gname" ]; then
+            usermod -aG "$_gname" "$USER_NAME" >/dev/null 2>&1 || true
+        fi
+    fi
+done
+
+# The NVIDIA Container Toolkit injects the driver libraries but does not always install the
+# glvnd/Vulkan manifests that tell the loaders those libraries exist -- leaving libEGL to fall
+# back to Mesa and any GPU-accelerated GL client to crash. Synthesise them when the library is
+# present but its manifest is not. Cheap, idempotent, and a no-op without the NVIDIA libs.
+if ldconfig -p 2>/dev/null | grep -q libEGL_nvidia.so.0; then
+    mkdir -p /usr/share/glvnd/egl_vendor.d
+    if [ ! -e /usr/share/glvnd/egl_vendor.d/10_nvidia.json ]; then
+        printf '%s\n' \
+            '{"file_format_version":"1.0.0","ICD":{"library_path":"libEGL_nvidia.so.0"}}' \
+            > /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+    fi
+fi
+# NVIDIA's GBM backend. The toolkit injects libnvidia-allocator.so.1 but not the
+# gbm/nvidia-drm_gbm.so name Mesa's libgbm looks for. Headless does not care, but a headed
+# Wayland window cannot get hardware buffers without it: chrome://gpu reports "Software only"
+# and no WebGL context is created at all.
+NV_ALLOC="$(ldconfig -p 2>/dev/null | awk '/libnvidia-allocator\.so\.1 /{print $NF; exit}')"
+if [ -n "$NV_ALLOC" ] && [ -e "$NV_ALLOC" ]; then
+    GBM_DIR="$(dirname "$NV_ALLOC")/gbm"
+    mkdir -p "$GBM_DIR"
+    [ -e "$GBM_DIR/nvidia-drm_gbm.so" ] || ln -sf "$NV_ALLOC" "$GBM_DIR/nvidia-drm_gbm.so"
+fi
+
+if ldconfig -p 2>/dev/null | grep -q libGLX_nvidia.so.0; then
+    mkdir -p /usr/share/vulkan/icd.d
+    if [ ! -e /usr/share/vulkan/icd.d/nvidia_icd.json ]; then
+        printf '%s\n' \
+            '{"file_format_version":"1.0.0","ICD":{"library_path":"libGLX_nvidia.so.0","api_version":"1.3.0"}}' \
+            > /usr/share/vulkan/icd.d/nvidia_icd.json
+    fi
+fi
+
 # Ensure HOME exists (Docker auto-creates mount targets as root; the top-level home dir itself may
 # not be a mount). Chown only the top dir, never recurse into mounted subtrees.
 mkdir -p "$HOST_HOME"
 chown "$HOST_UID:$HOST_GID" "$HOST_HOME" 2>/dev/null || true
+
+# ~/.config is created root-owned by Docker whenever something is mounted beneath it (e.g.
+# ~/.config/gh), leaving the user unable to write there. Anything that stores state under
+# XDG_CONFIG_HOME then breaks in confusing ways -- Chrome, for instance, cannot create its
+# crashpad database, passes an empty --database to the handler, and aborts at startup with
+# SIGTRAP. Chown the directory ONLY; never recurse, since the mounts inside it are host paths.
+mkdir -p "$HOST_HOME/.config"
+chown "$HOST_UID:$HOST_GID" "$HOST_HOME/.config" 2>/dev/null || true
+
+# When a socket is forwarded into /run/user/<uid> (e.g. --wayland), Docker auto-creates that
+# parent as root:root 0755, but XDG_RUNTIME_DIR must be owned by the user and mode 0700 or
+# clients refuse it. Chown the directory ONLY, never its contents: the sockets inside are host
+# bind mounts and chowning them would alter the host's files.
+RUNTIME_DIR="/run/user/$HOST_UID"
+if [ -d "$RUNTIME_DIR" ]; then
+    chown "$HOST_UID:$HOST_GID" "$RUNTIME_DIR" 2>/dev/null || true
+    chmod 700 "$RUNTIME_DIR" 2>/dev/null || true
+fi
 
 # The host config records installMethod=native, so claude expects its own binary at
 # ~/.local/bin/claude. We bind-mount it at /usr/local/bin/claude instead, so create the expected
@@ -109,6 +176,9 @@ if [ "${SBCLAUDE_RECOVER:-0}" = "1" ]; then
 fi
 
 # Drop to the mapped user with a correct HOME/USER/PATH environment and exec claude.
-exec gosu "$HOST_UID:$HOST_GID" \
+# NOTE: gosu is given the UID only, deliberately. Passing "uid:gid" would set the group list to
+# exactly that one group, discarding the device groups re-added above. The primary group is
+# already HOST_GID via the passwd entry.
+exec gosu "$HOST_UID" \
     env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
     claude "${SKIP_FLAG[@]}" "$@"

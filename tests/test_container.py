@@ -362,12 +362,42 @@ def test_build_run_argv_gpu(mocker: MockerFixture, tmp_path: Path) -> None:
     dev = tmp_path / 'nvidia0'
     dev.write_text('')
     mocker.patch('sbclaude.container.NVIDIA_DEVICES', (dev, tmp_path / 'absent-nvidiactl'))
+    mocker.patch('sbclaude.container.DRI_DEVICE_DIR', tmp_path / 'absent-dri')
     project = tmp_path / 'p'
     project.mkdir()
     argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpu=True))
     assert argv[argv.index('--gpus') + 1] == 'all'
-    assert 'NVIDIA_DRIVER_CAPABILITIES=compute,utility' in argv
+    # `graphics` is required for the GL/EGL/Vulkan userspace, not just CUDA.
+    assert 'NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics' in argv
     assert argv[argv.index('--group-add') + 1] == str(dev.stat().st_gid)
+
+
+def test_build_run_argv_gpu_x11_adds_display_cap(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.NVIDIA_DEVICES', ())
+    mocker.patch('sbclaude.container.DRI_DEVICE_DIR', tmp_path / 'absent-dri')
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_gpu=True, use_x11=True))
+    assert 'NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display' in argv
+
+
+def test_build_run_argv_gpu_passes_dri_render_nodes(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.NVIDIA_DEVICES', ())
+    dri = tmp_path / 'dri'
+    dri.mkdir()
+    (node := dri / 'renderD128').write_text('')
+    (dri / 'card0').write_text('')  # Not a render node; must not be passed through.
+    mocker.patch('sbclaude.container.DRI_DEVICE_DIR', dri)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpu=True))
+    assert argv[argv.index('--device') + 1] == str(node)
+    assert str(dri / 'card0') not in argv
 
 
 def test_build_run_argv_ios(mocker: MockerFixture, tmp_path: Path) -> None:
@@ -613,6 +643,51 @@ def test_build_run_argv_x11_without_cookie(mocker: MockerFixture, tmp_path: Path
     argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_x11=True))
     assert 'DISPLAY=:0' in argv
     assert not any(a.startswith('XAUTHORITY=') for a in argv)
+
+
+def test_build_run_argv_wayland(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    runtime = tmp_path / 'run'
+    runtime.mkdir()
+    (runtime / 'wayland-1').write_text('')
+    mocker.patch.dict(os.environ, {'XDG_RUNTIME_DIR': str(runtime), 'WAYLAND_DISPLAY': 'wayland-1'})
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_wayland=True))
+    assert 'WAYLAND_DISPLAY=wayland-1' in argv
+    assert 'XDG_RUNTIME_DIR=/run/user/1234' in argv
+    # Read-write: a Wayland client must be able to write to the socket.
+    assert f'{runtime / "wayland-1"}:/run/user/1234/wayland-1' in argv
+
+
+def test_build_run_argv_wayland_absolute_display(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    sock = tmp_path / 'elsewhere' / 'wayland-9'
+    sock.parent.mkdir()
+    sock.write_text('')
+    mocker.patch.dict(os.environ, {'WAYLAND_DISPLAY': str(sock)})
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_wayland=True))
+    assert 'WAYLAND_DISPLAY=wayland-9' in argv
+    assert f'{sock}:/run/user/1234/wayland-9' in argv
+
+
+def test_build_run_argv_wayland_missing_socket(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'XDG_RUNTIME_DIR': str(tmp_path), 'WAYLAND_DISPLAY': 'absent-0'})
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_wayland=True))
+    assert not any(a.startswith('WAYLAND_DISPLAY=') for a in argv)
 
 
 def test_run_cleans_up_patched_settings(mocker: MockerFixture, tmp_path: Path) -> None:

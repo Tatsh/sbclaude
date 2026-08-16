@@ -99,6 +99,8 @@ more than one is running).
 | `--android`         | mount Android SDK + `~/.android` + `/dev/kvm` (adb/emulator)                     |
 | `--usb`             | expose `/dev/bus/usb` for adb over USB                                           |
 | `--ios`             | mount the host `usbmuxd` socket so frida reaches an iOS device over USB          |
+| `--gpu`             | expose the host GPUs (NVIDIA runtime plus the DRM render nodes)                  |
+| `--wayland`         | forward the Wayland socket for GUI apps (preferred over `--x11`)                 |
 | `--x11`             | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator)   |
 | `--ssh`             | mount the host `~/.ssh` read-only and forward the ssh-agent, for SSH git remotes |
 | `--gpg`             | mount the host GnuPG home + agent socket for signing commits                     |
@@ -119,6 +121,7 @@ gpg = true       # mount the GnuPG home + agent for signing
 network = "host" # default; "bridge" to isolate the box's network
 re = true        # enable the Ghidra + Android mounts together
 ssh = true       # mount ~/.ssh read-only + forward the ssh-agent for SSH git remotes
+wayland = true   # forward the Wayland socket for GUI apps
 x11 = true       # forward X11 for GUI apps
 # image = "custom:latest"         # force a different image
 # debian_mirror = "http://ftp.us.debian.org/debian" # apt mirror for image builds
@@ -133,9 +136,9 @@ rw = []                                            # the project dir is always r
 CLAUDE_CODE_USE_BEDROCK = "1"
 ```
 
-The toggle keys `re`, `ghidra`, `android`, `usb`, `ios`, `x11`, `ssh`, and `gpg` mirror the
-matching `run` flags and default to `false`; setting one is the same as always passing that
-flag.
+The toggle keys `re`, `ghidra`, `android`, `gpu`, `usb`, `ios`, `wayland`, `x11`, `ssh`, and
+`gpg` mirror the matching `run` flags and default to `false`; setting one is the same as always
+passing that flag.
 
 **Debian mirror** — when `deb.debian.org` is slow, point image builds at a faster archive
 mirror with `debian_mirror` (or `--debian-mirror` on `build`/`run`). Only the image's main
@@ -265,6 +268,17 @@ sbclaude run --re --x11 -p ~/dev/some-apk-re
 `--x11` mounts `/tmp/.X11-unix` + your session xauth cookie and sets `DISPLAY`/
 `XAUTHORITY`. Java/Swing (Ghidra) renders through XWayland (`:0`). If a GUI fails with a
 cookie error, run on the host: `xhost +SI:localuser:$USER`.
+
+`--wayland` is the better option when the app speaks Wayland: it forwards the compositor
+socket alone, and a Wayland client cannot read other windows or inject input into them, whereas
+an X11 cookie grants exactly that over the whole session. The socket is re-homed under the
+box's own `/run/user/<uid>` and `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR` are set to match.
+
+`--gpu` uses the NVIDIA container runtime when it is present and also passes through the DRM
+render nodes (`/dev/dri/renderD*`), so Mesa on AMD/Intel and Vulkan/VA-API work too. The
+entrypoint re-adds the device groups Docker granted, and synthesises the glvnd/Vulkan/GBM
+manifests the NVIDIA toolkit does not install, so GL, EGL, and Vulkan clients get the real
+driver instead of a software fallback.
 
 `--ios` targets an **iOS** device attached to the host. The host runs `usbmuxd` (it owns
 the USB device), and frida's usbmux backend reaches the device through that daemon's

@@ -62,6 +62,10 @@ def main(ctx: click.Context) -> None:
               'use_ios',
               is_flag=True,
               help='Mount the host usbmuxd socket so frida can reach an iOS device.')
+@click.option('--wayland',
+              'use_wayland',
+              is_flag=True,
+              help='Forward the Wayland socket for GUIs (preferred over --x11).')
 @click.option('--x11', 'use_x11', is_flag=True, help='Forward DISPLAY + XAUTHORITY for GUIs.')
 @click.option('--ssh',
               'use_ssh',
@@ -109,6 +113,7 @@ def run(
     use_android: bool,
     use_usb: bool,
     use_ios: bool,
+    use_wayland: bool,
     use_x11: bool,
     use_ssh: bool,
     use_gpg: bool,
@@ -126,6 +131,7 @@ def run(
     use_android = use_android or use_re or cfg.android
     use_usb = use_usb or cfg.usb
     use_ios = use_ios or cfg.ios
+    use_wayland = use_wayland or cfg.wayland
     use_x11 = use_x11 or cfg.x11
     use_ssh = use_ssh or cfg.ssh
     use_gpg = use_gpg or cfg.gpg
@@ -143,6 +149,7 @@ def run(
                              use_android=use_android,
                              use_usb=use_usb,
                              use_ios=use_ios,
+                             use_wayland=use_wayland,
                              use_x11=use_x11,
                              use_ssh=use_ssh,
                              use_gpg=use_gpg,

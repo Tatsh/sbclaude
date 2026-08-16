@@ -63,6 +63,8 @@ USB_DEVICE_DIR = Path('/dev/bus/usb')
 """Host USB device tree, exposed for adb over USB."""
 NVIDIA_DEVICES = (Path('/dev/nvidia0'), Path('/dev/nvidiactl'))
 """Host NVIDIA device nodes whose groups the box joins for GPU access."""
+DRI_DEVICE_DIR = Path('/dev/dri')
+"""Host DRM device directory; its render nodes are passed through for GPU rendering."""
 UV_ENV_PREFIX = '/tmp/sbclaude-uv-'  # noqa: S108
 """Prefix for the container-local uv project environment (keeps it out of the project)."""
 _NAME_SANITIZE = re.compile(r'[^a-zA-Z0-9_.-]')
@@ -116,6 +118,8 @@ class RunSpec:
     """Whether to mount the host ``~/.ssh`` read-only and forward the ssh-agent socket."""
     use_usb: bool = False
     """Whether to expose ``/dev/bus/usb`` for adb over USB."""
+    use_wayland: bool = False
+    """Whether to forward the Wayland compositor socket."""
     use_x11: bool = False
     """Whether to forward X11 ``DISPLAY`` and ``XAUTHORITY``."""
 
@@ -275,7 +279,7 @@ def config_dir(home: Path) -> Path:
     return Path(override).expanduser() if override else home / '.claude'
 
 
-def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:  # noqa: C901
+def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     """
     Build the ``docker run`` argv for an interactive claude session.
 
@@ -334,31 +338,44 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:  # noqa: C90
                 argv += _v(tool, ro=True)
     if spec.use_ghidra and GHIDRA_DIR.is_dir():
         argv += _v(GHIDRA_DIR, ro=True)
-    if spec.use_gpu:
-        argv += _gpu_args()
-    if spec.use_android:
-        argv += _android_args(home)
-    if spec.use_usb and USB_DEVICE_DIR.is_dir():
-        argv += _v(USB_DEVICE_DIR)
-    if spec.use_ios:
-        argv += _ios_args()
-    if spec.use_ssh:
-        argv += _ssh_args(home)
-    if spec.use_gpg:
-        argv += _gpg_args(home)
-    if spec.use_x11:
-        argv += _x11_args(uid, user)
+    # Optional feature mounts, as (enabled, build-args) pairs. A table rather than a run of `if`
+    # statements: each entry is independent, so adding one should not grow the function's
+    # branching. Order is preserved and matters only for readability of the final argv.
+    optional_args = (
+        (spec.use_gpu, lambda: _gpu_args(use_x11=spec.use_x11)),
+        (spec.use_android, lambda: _android_args(home)),
+        (spec.use_usb and USB_DEVICE_DIR.is_dir(), lambda: _v(USB_DEVICE_DIR)),
+        (spec.use_ios, _ios_args),
+        (spec.use_ssh, lambda: _ssh_args(home)),
+        (spec.use_gpg, lambda: _gpg_args(home)),
+        (spec.use_wayland, lambda: _wayland_args(uid)),
+        (spec.use_x11, lambda: _x11_args(uid, user)),
+    )
+    for enabled, build_args in optional_args:
+        if enabled:
+            argv += build_args()
     argv += spec.extra_args
     argv.append(image)
     argv += list(spec.claude_args)
     return argv, cleanup
 
 
-def _gpu_args() -> list[str]:
-    args = ['--gpus', 'all', '-e', 'NVIDIA_DRIVER_CAPABILITIES=compute,utility']
+def _gpu_args(*, use_x11: bool = False) -> list[str]:
+    # `graphics` is what makes the NVIDIA Container Toolkit inject the GL/EGL/Vulkan userspace
+    # (libGL, libEGL, libnvidia-glcore, the Vulkan ICD). Without it only CUDA is available and
+    # anything that renders -- headless Chrome/WebGL, Qt, ffmpeg filters -- silently falls back
+    # to software. `display` adds the GLX bits, needed only when driving a real X server.
+    caps = 'compute,utility,graphics'
+    if use_x11:
+        caps += ',display'
+    args = ['--gpus', 'all', '-e', f'NVIDIA_DRIVER_CAPABILITIES={caps}']
     for dev in NVIDIA_DEVICES:
         if dev.exists():
             args += ['--group-add', str(dev.stat().st_gid)]
+    # DRM render nodes. Needed by Mesa on AMD/Intel, and used by Vulkan/VA-API even on NVIDIA.
+    # Passed as devices (not a bind mount) so the device cgroup actually allows access.
+    for node in sorted(DRI_DEVICE_DIR.glob('renderD*')) if DRI_DEVICE_DIR.is_dir() else []:
+        args += ['--device', str(node), '--group-add', str(node.stat().st_gid)]
     return args
 
 
@@ -505,6 +522,41 @@ def _gitconfig_args(home: Path) -> list[str]:
     if not args and (gitconfig := home / '.gitconfig').is_file():
         args += _v(gitconfig, ro=True)
     return args
+
+
+def _wayland_args(uid: int) -> list[str]:
+    """
+    Forward the Wayland socket.
+
+    Preferred over X11 for GUIs: a Wayland client cannot read other windows or inject input into
+    them, whereas handing over an X11 cookie grants exactly that over the whole session. It is
+    also a single socket rather than socket + cookie, and NVIDIA drives it through EGL, so the
+    ``display`` (GLX) driver capability is not needed.
+
+    Parameters
+    ----------
+    uid : int
+        Host user ID, used to place the socket under the container's ``/run/user/<uid>``.
+
+    Returns
+    -------
+    list[str]
+        ``docker run`` arguments, or an empty list when no compositor socket exists.
+    """
+    display = Path(os.environ.get('WAYLAND_DISPLAY', 'wayland-0'))
+    runtime = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{uid}')
+    # WAYLAND_DISPLAY may itself be an absolute path.
+    sock = display if display.is_absolute() else runtime / display
+    if not sock.exists():
+        sys.stderr.write(f'sbclaude: --wayland: no compositor socket at {sock}; skipping\n')
+        return []
+    # Re-home the socket under the container's own XDG_RUNTIME_DIR. Mounted read-write: a Wayland
+    # client must write to the socket.
+    target = f'/run/user/{uid}/{sock.name}'
+    return [
+        *_v(sock, target), '-e', f'WAYLAND_DISPLAY={sock.name}', '-e',
+        f'XDG_RUNTIME_DIR=/run/user/{uid}'
+    ]
 
 
 def _x11_args(uid: int, user: str) -> list[str]:
