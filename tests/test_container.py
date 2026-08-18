@@ -596,8 +596,9 @@ def test_build_run_argv_gpg_bridges_the_runtime_socket_too(mocker: MockerFixture
 
 def test_build_run_argv_gpg_socket_already_at_the_runtime_path(mocker: MockerFixture,
                                                                tmp_path: Path) -> None:
-    # The usual host layout: the socket is already where the box will look, so it is mounted
-    # over the home fallback only and never onto itself.
+    # The usual host layout: the socket already sits where the box will look. That still has
+    # to be mounted, because the matching paths name different files -- /run/user/<uid> in the
+    # box is its own tmpfs -- and leaving it out is what makes the box start its own agent.
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch.dict(os.environ, {'GNUPGHOME': ''})
@@ -610,7 +611,7 @@ def test_build_run_argv_gpg_socket_already_at_the_runtime_path(mocker: MockerFix
     project.mkdir()
     argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpg=True))
     assert f'{sock}:{gnupg / "S.gpg-agent"}' in argv
-    assert f'{sock}:{sock}' not in argv
+    assert f'{sock}:{sock}' in argv
 
 
 def test_build_run_argv_gpg_socket_in_home(mocker: MockerFixture, tmp_path: Path) -> None:

@@ -478,10 +478,11 @@ def _gpg_args(home: Path, uid: int) -> list[str]:
     # is /run/user/<uid>/gnupg, and without it gpg falls back to <GNUPGHOME>/S.gpg-agent.
     # Which of the two applies is not ours to predict -- --wayland and --ssh both forward a
     # socket into /run/user/<uid>, which makes Docker create it and the entrypoint chown it
-    # to the user -- so overlay the live host socket at both paths. The unused one costs a
-    # bind mount and nothing else, whereas guessing wrong costs the ability to sign: gpg does
-    # not report a missing agent, it silently starts its own inside the box, and that one can
-    # only reach pinentry-curses, which needs a TTY the box does not have.
+    # to the user -- so overlay the live host socket at both paths, unconditionally. The
+    # unused one costs a bind mount and nothing else, whereas guessing wrong costs the
+    # ability to sign: gpg does not report a missing agent, it silently starts its own inside
+    # the box, and that one can only reach pinentry-curses, which needs a TTY the box does
+    # not have.
     homedir = Path(os.environ.get('GNUPGHOME') or home / '.gnupg')
     if not homedir.is_dir():
         return []
@@ -491,9 +492,11 @@ def _gpg_args(home: Path, uid: int) -> list[str]:
     if (socket := _gpg_agent_socket()) and socket.is_socket():
         if not socket.is_relative_to(homedir):
             args += _v(socket, homedir / 'S.gpg-agent')
-        runtime_socket = Path(f'/run/user/{uid}/gnupg/S.gpg-agent')
-        if socket != runtime_socket:
-            args += _v(socket, runtime_socket)
+        # Mount at the runtime path even when the host socket already lives there. The paths
+        # match but the files do not: /run/user/<uid> inside the box is its own tmpfs, so
+        # skipping this leaves nothing at the very path the box's gpg prefers, which is the
+        # usual host layout rather than an unusual one.
+        args += _v(socket, Path(f'/run/user/{uid}/gnupg/S.gpg-agent'))
     return args
 
 
