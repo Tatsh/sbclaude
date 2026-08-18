@@ -181,7 +181,7 @@ def _host_venv_args(project: Path) -> list[str]:
     venv = project / HOST_VENV_DIR_NAME
     if not venv.is_dir():
         return []
-    return _v(venv, ro=True)
+    return [*_v(venv, ro=True)]
 
 
 def exclude_venv_from_git(project: Path) -> bool:
