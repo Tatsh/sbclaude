@@ -70,7 +70,7 @@ VENV_DIR_NAME = '.sbclaude-venv'
 HOST_VENV_DIR_NAME = '.venv'
 """Name of the host's virtualenv directory, which the box mounts read-only."""
 GIT_EXCLUDE_ENTRY = f'/{VENV_DIR_NAME}/'
-"""Entry written to ``.git/info/exclude`` so the box's virtualenv never shows up in git status."""
+"""Entry written to ``.gitignore`` so the box's virtualenv never shows up in git status."""
 _NAME_SANITIZE = re.compile(r'[^a-zA-Z0-9_.-]')
 """Pattern matching characters not allowed in a derived container or path name."""
 
@@ -186,11 +186,7 @@ def _host_venv_args(project: Path) -> list[str]:
 
 def exclude_venv_from_git(project: Path) -> bool:
     """
-    Add the box's virtualenv to the project's ``.git/info/exclude``.
-
-    ``info/exclude`` rather than ``.gitignore``: the box's virtualenv is a local artefact of how
-    this project is being worked on, so ignoring it should not be a change to a tracked file that
-    every other checkout of the repository then carries.
+    Add the box's virtualenv to the project's ``.gitignore``.
 
     Parameters
     ----------
@@ -201,16 +197,15 @@ def exclude_venv_from_git(project: Path) -> bool:
     -------
     bool
         ``True`` if the entry was added, ``False`` if it was already there or the project is not
-        a git repository with a writable ``info`` directory.
+        a git repository.
     """
-    info = project / '.git' / 'info'
-    if not info.is_dir():
+    if not (project / '.git').exists():
         return False
-    exclude = info / 'exclude'
+    gitignore = project / '.gitignore'
     try:
-        existing = exclude.read_text().splitlines() if exclude.is_file() else []
+        existing = gitignore.read_text().splitlines() if gitignore.is_file() else []
     except OSError as e:
-        sys.stderr.write(f'sbclaude: could not read {exclude}: {e}\n')
+        sys.stderr.write(f'sbclaude: could not read {gitignore}: {e}\n')
         return False
     if GIT_EXCLUDE_ENTRY in existing:
         return False
@@ -218,10 +213,10 @@ def exclude_venv_from_git(project: Path) -> bool:
     # final line and silently change that pattern instead.
     prefix = '\n' if existing and existing[-1].strip() else ''
     try:
-        with exclude.open('a') as f:
+        with gitignore.open('a') as f:
             f.write(f'{prefix}{GIT_EXCLUDE_ENTRY}\n')
     except OSError as e:
-        sys.stderr.write(f'sbclaude: could not update {exclude}: {e}\n')
+        sys.stderr.write(f'sbclaude: could not update {gitignore}: {e}\n')
         return False
     return True
 

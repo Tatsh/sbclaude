@@ -50,25 +50,24 @@ def test_host_venv_not_mounted_when_absent(tmp_path: Path, mocker: MockerFixture
 
 
 def test_exclude_venv_from_git_adds_entry(tmp_path: Path) -> None:
-    (tmp_path / '.git' / 'info').mkdir(parents=True)
+    (tmp_path / '.git').mkdir()
     assert container.exclude_venv_from_git(tmp_path) is True
-    assert '/.sbclaude-venv/' in (tmp_path / '.git' / 'info' / 'exclude').read_text().splitlines()
+    assert '/.sbclaude-venv/' in (tmp_path / '.gitignore').read_text().splitlines()
 
 
 def test_exclude_venv_from_git_is_idempotent(tmp_path: Path) -> None:
-    (tmp_path / '.git' / 'info').mkdir(parents=True)
+    (tmp_path / '.git').mkdir()
     assert container.exclude_venv_from_git(tmp_path) is True
     assert container.exclude_venv_from_git(tmp_path) is False
-    text = (tmp_path / '.git' / 'info' / 'exclude').read_text()
+    text = (tmp_path / '.gitignore').read_text()
     assert text.count('/.sbclaude-venv/') == 1
 
 
 def test_exclude_venv_from_git_keeps_existing_entries(tmp_path: Path) -> None:
-    info = tmp_path / '.git' / 'info'
-    info.mkdir(parents=True)
-    (info / 'exclude').write_text('# a comment\n/scratch/\n')
+    (tmp_path / '.git').mkdir()
+    (tmp_path / '.gitignore').write_text('# a comment\n/scratch/\n')
     assert container.exclude_venv_from_git(tmp_path) is True
-    lines = (info / 'exclude').read_text().splitlines()
+    lines = (tmp_path / '.gitignore').read_text().splitlines()
     assert lines[:2] == ['# a comment', '/scratch/']
     assert '/.sbclaude-venv/' in lines
 
