@@ -198,7 +198,15 @@ def _resolve_env(cfg: Config, proj: Path, env_extra: tuple[str, ...]) -> dict[st
     """
     env: dict[str, str] = {}
     if cfg.manage_uv_env:
-        env['UV_PROJECT_ENVIRONMENT'] = container.uv_project_environment(proj)
+        # Relative, deliberately: uv resolves it against whichever project it is working on, so
+        # every project the box touches gets its own virtualenv beside its own pyproject.toml. An
+        # absolute path here would funnel a `uv sync` run in any second project into the first
+        # project's environment and quietly replace its packages.
+        env['UV_PROJECT_ENVIRONMENT'] = container.VENV_DIR_NAME
+        # Absolute, because the entrypoint provisions this one and puts its bin directory on PATH.
+        env['SBCLAUDE_VENV'] = container.uv_project_environment(proj)
+        env['SBCLAUDE_SETUP_VENV'] = '1' if cfg.setup_venv else '0'
+        container.exclude_venv_from_git(proj)
     env.update(cfg.env)
     env.update({k: os.environ[k] for k in (*DEFAULT_PASS_ENV, *cfg.pass_env) if k in os.environ})
     for item in env_extra:

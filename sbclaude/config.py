@@ -76,7 +76,9 @@ class Config:
     ios: bool = False
     """Whether to mount the host usbmuxd socket so frida can reach an iOS device."""
     manage_uv_env: bool = True
-    """Whether to point ``UV_PROJECT_ENVIRONMENT`` at a container-local path by default."""
+    """Whether to give the box its own virtualenv instead of the project's ``.venv``."""
+    setup_venv: bool = True
+    """Whether the box provisions that virtualenv on start when the project looks like Python."""
     memory: str | None = None
     """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
     network: str = DEFAULT_NETWORK
@@ -160,6 +162,7 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   recover=bool(data.get('recover', False)),
                   ro=_str_list(data.get('ro')),
                   rw=_str_list(data.get('rw')),
+                  setup_venv=bool(data.get('setup_venv', True)),
                   ssh=bool(data.get('ssh', False)),
                   usb=bool(data.get('usb', False)),
                   wayland=bool(data.get('wayland', False)),

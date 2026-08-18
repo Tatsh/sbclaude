@@ -28,17 +28,53 @@ def test_unique_name() -> None:
 
 
 def test_uv_project_environment() -> None:
-    assert container.uv_project_environment(
-        Path('/a/b/My Proj')) == f'{container.UV_ENV_PREFIX}My-Proj'
+    assert container.uv_project_environment(Path('/a/b/My Proj')) == '/a/b/My Proj/.sbclaude-venv'
 
 
-@pytest.mark.parametrize(('name', 'expected'), [
-    ('a@b:c d', 'a-b-c-d'),
-    ('keep.this_one-here', 'keep.this_one-here'),
-])
-def test_uv_project_environment_sanitises(name: str, expected: str) -> None:
-    assert container.uv_project_environment(
-        Path('/a/b') / name) == f'{container.UV_ENV_PREFIX}{expected}'
+def test_uv_project_environment_is_never_the_host_venv() -> None:
+    project = Path('/a/b/proj')
+    assert container.uv_project_environment(project) != str(project / '.venv')
+
+
+def test_host_venv_mounted_read_only(tmp_path: Path, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.claude_binary', return_value=Path('/usr/bin/claude'))
+    (tmp_path / '.venv' / 'bin').mkdir(parents=True)
+    argv, _ = container.build_run_argv(container.RunSpec(name='n', project=tmp_path))
+    assert f'{tmp_path}/.venv:{tmp_path}/.venv:ro' in argv
+
+
+def test_host_venv_not_mounted_when_absent(tmp_path: Path, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.claude_binary', return_value=Path('/usr/bin/claude'))
+    argv, _ = container.build_run_argv(container.RunSpec(name='n', project=tmp_path))
+    assert not any('.venv' in arg for arg in argv)
+
+
+def test_exclude_venv_from_git_adds_entry(tmp_path: Path) -> None:
+    (tmp_path / '.git' / 'info').mkdir(parents=True)
+    assert container.exclude_venv_from_git(tmp_path) is True
+    assert '/.sbclaude-venv/' in (tmp_path / '.git' / 'info' / 'exclude').read_text().splitlines()
+
+
+def test_exclude_venv_from_git_is_idempotent(tmp_path: Path) -> None:
+    (tmp_path / '.git' / 'info').mkdir(parents=True)
+    assert container.exclude_venv_from_git(tmp_path) is True
+    assert container.exclude_venv_from_git(tmp_path) is False
+    text = (tmp_path / '.git' / 'info' / 'exclude').read_text()
+    assert text.count('/.sbclaude-venv/') == 1
+
+
+def test_exclude_venv_from_git_keeps_existing_entries(tmp_path: Path) -> None:
+    info = tmp_path / '.git' / 'info'
+    info.mkdir(parents=True)
+    (info / 'exclude').write_text('# a comment\n/scratch/\n')
+    assert container.exclude_venv_from_git(tmp_path) is True
+    lines = (info / 'exclude').read_text().splitlines()
+    assert lines[:2] == ['# a comment', '/scratch/']
+    assert '/.sbclaude-venv/' in lines
+
+
+def test_exclude_venv_from_git_without_a_repository(tmp_path: Path) -> None:
+    assert container.exclude_venv_from_git(tmp_path) is False
 
 
 def test_claude_binary_missing(mocker: MockerFixture) -> None:

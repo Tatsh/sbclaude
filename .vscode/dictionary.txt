@@ -70,6 +70,7 @@ getpwuid
 getuid
 ghidra
 ghidra's
+girepository
 githubcli
 glab
 glcore
@@ -111,6 +112,7 @@ libera
 libfontconfig
 libfreetype
 libgbm
+libgirepository
 libgl
 libglu
 libglvnd
@@ -167,6 +169,7 @@ passthrough
 pathlib
 pavelzw
 pinentry
+Pipfile
 pipx
 platformdirs
 plistlib
@@ -176,6 +179,7 @@ prodvers
 pycache
 pydantic
 pydocstyle
+pygobject
 pyinstaller
 pylint
 pylock
@@ -184,6 +188,7 @@ pypi
 pyproject
 pytest
 pythonhosted
+pyvenv
 regen
 ripgreprc
 rmse

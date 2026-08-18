@@ -136,6 +136,105 @@ fi
 # image's toolchain PATH after it.
 export PATH="$HOST_HOME/.local/bin:$PATH"
 
+# Provision the box's own virtualenv when the working directory looks like a Python project.
+#
+# The host's .venv is mounted read-only and is useless in here anyway: a virtualenv hard-codes the
+# absolute path of the interpreter it was built against, and the host's does not exist in this
+# image. Building our own at a different path is what keeps the two from destroying each other.
+# SBCLAUDE_VENV is set by sbclaude and lives beside the project so it survives --rm.
+#
+# Best-effort: a project whose dependencies cannot be resolved here (a package needing host
+# headers, say) must still get a session, so a failure warns and carries on.
+if [ -n "${SBCLAUDE_VENV:-}" ] && [ "${SBCLAUDE_SETUP_VENV:-1}" = "1" ]; then
+    venv_marker=''
+    for candidate in pyproject.toml setup.py setup.cfg requirements.txt Pipfile; do
+        if [ -f "$candidate" ]; then
+            venv_marker=$candidate
+            break
+        fi
+    done
+    if [ -n "$venv_marker" ]; then
+        echo "sbclaude: $venv_marker found; preparing $SBCLAUDE_VENV" >&2
+        # Runs as the mapped user so everything it writes is owned by them, not root. The body is
+        # single-quoted deliberately: it must expand in the inner shell, not this one.
+        # shellcheck disable=SC2016
+        gosu "$HOST_UID:$HOST_GID" \
+            env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
+            bash -c '
+                # pipefail matters here: every command below is piped into tail to keep the
+                # session banner short, and without it the status read back would be tail is.
+                set -u -o pipefail
+                venv=$1
+                marker=$2
+                # Set here rather than trusted from the caller. Without it uv falls back to
+                # whatever it inherits, and a stale value points the sync at the environment of
+                # some other project and replaces the packages in it.
+                export UV_PROJECT_ENVIRONMENT="$venv"
+                # uv sync builds the virtualenv and installs the locked dependencies in one step,
+                # so only reach for python -m venv when there is no uv project to sync.
+                #
+                # A single dependency that cannot build here fails the whole sync, which would
+                # leave the box with no test runner and no linter over one package it was never
+                # going to use. Some cannot build at any price: pygobject 3.56 wants
+                # girepository-2.0, which wants a glib newer than the base image carries, so no
+                # amount of -dev packages will satisfy it.
+                #
+                # uv names the culprit in its hint line, so read it back, exclude that one package
+                # and try again. Each pass excludes one more, which converges because the set of
+                # dependencies is finite; the cap is only there so that a failure reported without
+                # a parseable hint cannot spin.
+                if command -v uv >/dev/null 2>&1 && [ -f pyproject.toml ]; then
+                    skips=()
+                    synced=0
+                    for _ in 1 2 3 4 5 6; do
+                        if out=$(uv sync --all-extras "${skips[@]}" 2>&1); then
+                            synced=1
+                            break
+                        fi
+                        printf "%s\n" "$out" | tail -15 >&2
+                        pkg=$(printf "%s\n" "$out" |
+                            sed -n "s/^hint: \`\([^\`]*\)\`.*was included because.*/\1/p" |
+                            head -1)
+                        if [ -z "$pkg" ]; then
+                            break
+                        fi
+                        echo "sbclaude: $pkg cannot be built here; retrying without it." >&2
+                        skips+=(--no-install-package "$pkg")
+                    done
+                    if [ "$synced" = 1 ]; then
+                        # Two array entries per exclusion: the flag and its value.
+                        excluded=$((${#skips[@]} / 2))
+                        if [ "$excluded" -eq 1 ]; then
+                            echo "sbclaude: virtualenv ready, minus 1 package that cannot be built here." >&2
+                        elif [ "$excluded" -gt 1 ]; then
+                            echo "sbclaude: virtualenv ready, minus $excluded packages that cannot be built here." >&2
+                        fi
+                        exit 0
+                    fi
+                    # Nothing above worked. Runtime dependencies alone are still worth more than
+                    # an empty virtualenv.
+                    echo "sbclaude: full sync failed; installing runtime dependencies only." >&2
+                    if uv sync --no-default-groups 2>&1 | tail -15; then
+                        exit 0
+                    fi
+                    echo "sbclaude: uv sync failed; falling back to a bare virtualenv." >&2
+                fi
+                if [ ! -x "$venv/bin/python" ] && ! python3 -m venv "$venv"; then
+                    exit 1
+                fi
+                if [ "$marker" = requirements.txt ] && \
+                    ! "$venv/bin/pip" install --quiet -r requirements.txt 2>&1 | tail -20; then
+                    echo "sbclaude: pip install failed; the virtualenv may be incomplete." >&2
+                fi
+                exit 0
+            ' _ "$SBCLAUDE_VENV" "$venv_marker" ||
+            echo "sbclaude: could not prepare $SBCLAUDE_VENV; continuing without it." >&2
+    fi
+    # On PATH regardless, so that python and pip resolve to the box's virtualenv rather than the
+    # image's /opt/venv even when provisioning was skipped or failed.
+    export PATH="$SBCLAUDE_VENV/bin:$PATH"
+fi
+
 # Set up cc-session-recover in the project (auto-resume across quota pauses) when SBCLAUDE_RECOVER=1
 # (sbclaude sets this for --session-recover). The installer is the clone at /opt/cc-session-recover;
 # it copies its hook templates relative to its own location and merges them into the project's

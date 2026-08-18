@@ -42,11 +42,13 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         libatspi2.0-0 \
         libcairo2-dev \
         libffi-dev \
+        libgirepository1.0-dev \
         locales \
         nodejs \
         openssh-client \
         pkg-config \
         python3 \
+        python3-dev \
         python3-pip \
         python3-venv \
         qt6-base-dev \

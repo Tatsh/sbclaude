@@ -65,8 +65,12 @@ NVIDIA_DEVICES = (Path('/dev/nvidia0'), Path('/dev/nvidiactl'))
 """Host NVIDIA device nodes whose groups the box joins for GPU access."""
 DRI_DEVICE_DIR = Path('/dev/dri')
 """Host DRM device directory; its render nodes are passed through for GPU rendering."""
-UV_ENV_PREFIX = '/tmp/sbclaude-uv-'  # noqa: S108
-"""Prefix for the container-local uv project environment (keeps it out of the project)."""
+VENV_DIR_NAME = '.sbclaude-venv'
+"""Name of the box's virtualenv directory, created beside the host's ``.venv``."""
+HOST_VENV_DIR_NAME = '.venv'
+"""Name of the host's virtualenv directory, which the box mounts read-only."""
+GIT_EXCLUDE_ENTRY = f'/{VENV_DIR_NAME}/'
+"""Entry written to ``.git/info/exclude`` so the box's virtualenv never shows up in git status."""
 _NAME_SANITIZE = re.compile(r'[^a-zA-Z0-9_.-]')
 """Pattern matching characters not allowed in a derived container or path name."""
 
@@ -143,11 +147,17 @@ def default_name(project: Path) -> str:
 
 def uv_project_environment(project: Path) -> str:
     """
-    Derive the container-local uv project-environment path for a project.
+    Derive the box's virtualenv path for a project.
 
-    Pointing ``UV_PROJECT_ENVIRONMENT`` here keeps uv from creating or reading a
-    ``.venv`` inside the bind-mounted project, so the box never touches the host's
-    virtualenv (whose interpreter paths would not resolve in the container anyway).
+    The box gets its own virtualenv, kept beside the project's rather than inside a container
+    path. A virtualenv records absolute interpreter paths, so one built on the host cannot run
+    in the box and one built in the box cannot run on the host; sharing ``.venv`` between them
+    leaves whichever ran last with a broken interpreter. Two directories mean neither disturbs
+    the other.
+
+    Beside the project rather than under ``/tmp`` so that it survives the box: the container is
+    always run with ``--rm``, so a virtualenv anywhere in the container's own filesystem would be
+    rebuilt from nothing on every start.
 
     Parameters
     ----------
@@ -157,9 +167,63 @@ def uv_project_environment(project: Path) -> str:
     Returns
     -------
     str
-        An absolute path under ``/tmp`` unique to the project name.
+        The absolute path of the box's virtualenv.
     """
-    return f'{UV_ENV_PREFIX}{_NAME_SANITIZE.sub("-", project.name)}'
+    return str(project / VENV_DIR_NAME)
+
+
+def _host_venv_args(project: Path) -> list[str]:
+    # Re-mount the host's virtualenv read-only over itself, so that nothing in the box can write
+    # to it. The bind mount of the project is read-write (the agent has to be able to edit the
+    # code), which would otherwise leave the host's interpreter, its installed packages, and its
+    # pyvenv.cfg writable by an agent running with permissions skipped. Read-only rather than
+    # hidden so that reading it still works, for example to see which packages the host resolved.
+    venv = project / HOST_VENV_DIR_NAME
+    if not venv.is_dir():
+        return []
+    return _v(venv, ro=True)
+
+
+def exclude_venv_from_git(project: Path) -> bool:
+    """
+    Add the box's virtualenv to the project's ``.git/info/exclude``.
+
+    ``info/exclude`` rather than ``.gitignore``: the box's virtualenv is a local artefact of how
+    this project is being worked on, so ignoring it should not be a change to a tracked file that
+    every other checkout of the repository then carries.
+
+    Parameters
+    ----------
+    project : Path
+        The project directory.
+
+    Returns
+    -------
+    bool
+        ``True`` if the entry was added, ``False`` if it was already there or the project is not
+        a git repository with a writable ``info`` directory.
+    """
+    info = project / '.git' / 'info'
+    if not info.is_dir():
+        return False
+    exclude = info / 'exclude'
+    try:
+        existing = exclude.read_text().splitlines() if exclude.is_file() else []
+    except OSError as e:
+        sys.stderr.write(f'sbclaude: could not read {exclude}: {e}\n')
+        return False
+    if GIT_EXCLUDE_ENTRY in existing:
+        return False
+    # Separate from whatever came before, so the entry cannot be appended onto an unterminated
+    # final line and silently change that pattern instead.
+    prefix = '\n' if existing and existing[-1].strip() else ''
+    try:
+        with exclude.open('a') as f:
+            f.write(f'{prefix}{GIT_EXCLUDE_ENTRY}\n')
+    except OSError as e:
+        sys.stderr.write(f'sbclaude: could not update {exclude}: {e}\n')
+        return False
+    return True
 
 
 def unique_name(project: Path) -> str:
@@ -326,6 +390,7 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         cleanup = _patched_settings(settings)
         argv += _v(cleanup, cfg_dir / 'settings.json')
     argv += _gitconfig_args(home)
+    argv += _host_venv_args(spec.project)
     for path in spec.ro:
         if path != spec.project:
             argv += _v(path, ro=True)

@@ -9,6 +9,7 @@ from sbclaude import container
 from sbclaude.config import Config
 from sbclaude.main import main
 from sbclaude.scaffold import ScaffoldResult
+import pytest
 
 if TYPE_CHECKING:
     from click.testing import CliRunner
@@ -168,7 +169,7 @@ def test_run_manages_uv_env_by_default(runner: CliRunner, mocker: MockerFixture)
     mocker.patch('sbclaude.main.load_config', return_value=Config())
     runner.invoke(main, ['run'])
     spec = run.call_args[0][0]
-    assert spec.env['UV_PROJECT_ENVIRONMENT'] == container.uv_project_environment(spec.project)
+    assert spec.env['UV_PROJECT_ENVIRONMENT'] == container.VENV_DIR_NAME
 
 
 def test_run_uv_env_override_wins(runner: CliRunner, mocker: MockerFixture) -> None:
@@ -183,7 +184,48 @@ def test_run_manage_uv_env_disabled(runner: CliRunner, mocker: MockerFixture) ->
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config(manage_uv_env=False))
     runner.invoke(main, ['run'])
-    assert 'UV_PROJECT_ENVIRONMENT' not in run.call_args[0][0].env
+    env = run.call_args[0][0].env
+    assert 'UV_PROJECT_ENVIRONMENT' not in env
+    assert 'SBCLAUDE_VENV' not in env
+
+
+def test_run_points_the_venv_variables_away_from_dot_venv(runner: CliRunner,
+                                                          mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run'])
+    spec = run.call_args[0][0]
+    assert spec.env['SBCLAUDE_VENV'] == container.uv_project_environment(spec.project)
+    assert not spec.env['SBCLAUDE_VENV'].endswith('/.venv')
+    assert spec.env['UV_PROJECT_ENVIRONMENT'] != '.venv'
+
+
+def test_run_uv_project_environment_is_relative(runner: CliRunner, mocker: MockerFixture) -> None:
+    # Relative so uv resolves it per project; an absolute path would send a sync run in a second
+    # project into the first project's environment.
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run'])
+    value = run.call_args[0][0].env['UV_PROJECT_ENVIRONMENT']
+    assert not Path(value).is_absolute()
+    assert value == container.VENV_DIR_NAME
+
+
+def test_run_excludes_the_box_venv_from_git(runner: CliRunner, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    exclude = mocker.patch('sbclaude.main.container.exclude_venv_from_git')
+    runner.invoke(main, ['run'])
+    exclude.assert_called_once()
+
+
+@pytest.mark.parametrize(('setup_venv', 'expected'), [(True, '1'), (False, '0')])
+def test_run_forwards_setup_venv(runner: CliRunner, mocker: MockerFixture, expected: str, *,
+                                 setup_venv: bool) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(setup_venv=setup_venv))
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].env['SBCLAUDE_SETUP_VENV'] == expected
 
 
 def test_run_uv_env_override_by_e_flag(runner: CliRunner, mocker: MockerFixture) -> None:
