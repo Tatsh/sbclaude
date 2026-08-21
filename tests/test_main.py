@@ -9,6 +9,7 @@ from sbclaude import container
 from sbclaude.config import Config
 from sbclaude.main import main
 from sbclaude.scaffold import ScaffoldResult
+import docker.errors
 import pytest
 
 if TYPE_CHECKING:
@@ -395,6 +396,24 @@ def test_build(runner: CliRunner, mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.main.load_config', return_value=Config())
     mocker.patch('sbclaude.main.container.build_images', return_value=iter(['line1', 'line2']))
     assert 'line1' in runner.invoke(main, ['build']).output
+
+
+def test_build_failure_exits_non_zero(runner: CliRunner, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    mocker.patch('sbclaude.main.container.build_images',
+                 side_effect=docker.errors.BuildError('step 11 failed', iter(())))
+    result = runner.invoke(main, ['build'])
+    assert result.exit_code != 0
+    assert 'step 11 failed' in result.output
+
+
+def test_run_reports_build_failure(runner: CliRunner, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    mocker.patch('sbclaude.main.container.run',
+                 side_effect=docker.errors.BuildError('step 11 failed', iter(())))
+    result = runner.invoke(main, ['run'])
+    assert result.exit_code != 0
+    assert 'step 11 failed' in result.output
 
 
 def test_build_debian_mirror(runner: CliRunner, mocker: MockerFixture) -> None:

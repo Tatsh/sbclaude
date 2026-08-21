@@ -248,12 +248,30 @@ def test_project_containers(mocker: MockerFixture) -> None:
 
 def test_build_images(mocker: MockerFixture) -> None:
     client = mocker.MagicMock()
-    client.api.build.return_value = [{'stream': 'Step 1/2\n'}, {'error': 'boom'}, {'stream': '  '}]
+    client.api.build.return_value = [{
+        'stream': 'Step 1/2\n'
+    }, {
+        'stream': '  '
+    }, {
+        'stream': 'Successfully built\n'
+    }]
     mocker.patch('sbclaude.container.docker.from_env', return_value=client)
     lines = list(container.build_images())
     assert any('Building sbclaude:latest' in line for line in lines)
     assert 'Step 1/2' in lines
+
+
+def test_build_images_raises_on_error(mocker: MockerFixture) -> None:
+    client = mocker.MagicMock()
+    client.api.build.return_value = [{'stream': 'Step 1/2\n'}, {'error': 'boom'}, {'stream': 'x\n'}]
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    lines: list[str] = []
+    # extend appends as it iterates, so what was yielded before the raise is kept.
+    with pytest.raises(docker.errors.BuildError):
+        lines.extend(container.build_images())
+    # The failing step is reported before the generator gives up, and nothing after it is run.
     assert 'boom' in lines
+    assert 'x' not in lines
 
 
 def test_build_images_debian_mirror(mocker: MockerFixture) -> None:
@@ -797,6 +815,26 @@ def test_ensure_image_rebuilds_when_stale(mocker: MockerFixture) -> None:
     container.ensure_image(container.IMAGE_BASE, log=logged.append)
     build.assert_called_once_with(debian_mirror=None)
     assert any('rebuilding' in line for line in logged)
+
+
+def test_ensure_image_failed_first_build_is_fatal(mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.image_up_to_date', return_value=False)
+    mocker.patch('sbclaude.container.image_exists', return_value=False)
+    mocker.patch('sbclaude.container.build_images',
+                 side_effect=docker.errors.BuildError('step 11 failed', iter(())))
+    with pytest.raises(docker.errors.BuildError):
+        container.ensure_image(container.IMAGE_BASE)
+
+
+def test_ensure_image_failed_rebuild_warns_and_continues(mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.image_up_to_date', return_value=False)
+    mocker.patch('sbclaude.container.image_exists', return_value=True)
+    mocker.patch('sbclaude.container.build_images',
+                 side_effect=docker.errors.BuildError('step 11 failed', iter(())))
+    logged: list[str] = []
+    container.ensure_image(container.IMAGE_BASE, log=logged.append)
+    assert any('FAILED' in line for line in logged)
+    assert any('stale' in line for line in logged)
 
 
 def test_ensure_image_skips_when_current(mocker: MockerFixture) -> None:

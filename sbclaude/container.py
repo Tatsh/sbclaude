@@ -790,13 +790,30 @@ def ensure_image(image: str,
         Sink for build log lines.
     debian_mirror : str | None
         Debian archive mirror to bake into the image when a build is triggered.
+
+    Raises
+    ------
+    docker.errors.BuildError
+        If the build fails and no usable image is already tagged.
     """
     if image != IMAGE_BASE or image_up_to_date(image):
         return
-    verb = 'rebuilding (Dockerfile changed)' if image_exists(image) else 'building'
-    log(f'Image {image} {verb}...')
-    for line in build_images(debian_mirror=debian_mirror):
-        log(line)
+    existing = image_exists(image)
+    log(f'Image {image} {"rebuilding (Dockerfile changed)" if existing else "building"}...')
+    try:
+        for line in build_images(debian_mirror=debian_mirror):
+            log(line)
+    except docker.errors.BuildError as e:
+        # A failed first build leaves nothing to run, so it is fatal. A failed rebuild is not:
+        # the previous image is still there and still works, and refusing to start would hand a
+        # transient upstream outage the power to stop every box. Say so loudly instead -- the
+        # session then knowingly runs an image that predates the change that triggered the
+        # rebuild.
+        if not existing:
+            raise
+        log(f'sbclaude: image build FAILED: {e}')
+        log(f'sbclaude: continuing with the existing, now stale {image}. Re-run `sbclaude build` '
+            'once the cause is fixed.')
 
 
 def list_managed() -> Iterator[dict[str, str]]:
@@ -888,6 +905,11 @@ def build_images(*, no_cache: bool = False, debian_mirror: str | None = None) ->
     ------
     str
         Build log lines.
+
+    Raises
+    ------
+    docker.errors.BuildError
+        If the daemon reports a failing build step, after that step's message is yielded.
     """
     client = _client()
     mirror = debian_mirror.rstrip('/') if debian_mirror else None
@@ -903,6 +925,14 @@ def build_images(*, no_cache: bool = False, debian_mirror: str | None = None) ->
                                       buildargs=buildargs,
                                       decode=True,
                                       rm=True):
-            line = chunk.get('stream') or chunk.get('error') or ''
-            if line.strip():
+            if (error := chunk.get('error')) and error.strip():
+                # The daemon reports a failed step in-band, as one more chunk of the log. Without
+                # raising here the generator would end normally and the caller would carry on as
+                # though the image had been built, leaving whatever stale image happened to
+                # already carry the tag in place.
+                yield error.rstrip('\n')
+                # The log has already been streamed to the caller line by line, so the exception
+                # carries an empty one rather than repeating it.
+                raise docker.errors.BuildError(error.strip(), iter(()))
+            if (line := chunk.get('stream', '')).strip():
                 yield line.rstrip('\n')

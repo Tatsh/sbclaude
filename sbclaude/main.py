@@ -7,6 +7,7 @@ import os
 
 from bascom import setup_logging
 import click
+import docker.errors
 
 from . import container
 from .config import Config, config_path, expand_paths, load_config
@@ -166,7 +167,7 @@ def run(
                              claude_args=claude_args)
     try:
         raise SystemExit(container.run(spec))
-    except FileNotFoundError as e:
+    except (FileNotFoundError, docker.errors.BuildError) as e:
         raise click.ClickException(str(e)) from e
 
 
@@ -268,10 +269,14 @@ def shell(name: str | None) -> None:
               help='Debian archive mirror to bake into the image, e.g. '
               'http://ftp.us.debian.org/debian.')
 def build(debian_mirror: str | None, *, no_cache: bool) -> None:
-    """Build the sbclaude Docker image from the packaged Dockerfile."""
+    """Build the sbclaude Docker image from the packaged Dockerfile."""  # noqa: DOC501
     mirror = debian_mirror or load_config().debian_mirror
-    for line in container.build_images(no_cache=no_cache, debian_mirror=mirror):
-        click.echo(line)
+    try:
+        for line in container.build_images(no_cache=no_cache, debian_mirror=mirror):
+            click.echo(line)
+    except docker.errors.BuildError as e:
+        msg = f'Image build failed: {e}'
+        raise click.ClickException(msg) from e
 
 
 @main.command(name='delete-image')

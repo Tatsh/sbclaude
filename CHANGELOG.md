@@ -24,6 +24,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A failed image build no longer passes for a successful one. The daemon reports a failing step
+  in-band as one more log chunk, which was echoed and otherwise ignored, so `sbclaude build` exited
+  0 and `sbclaude run` went on to start a box on whatever stale image still carried the tag.
+  `build` now exits non-zero, and `run` aborts when there is no image at all and warns loudly when
+  it falls back to the previous one (a failed rebuild should not be able to stop every box over a
+  transient upstream outage).
 - The image build no longer fails when upstream publishes a release with no assets attached to it.
   The baksmali and smali jars were fetched from a URL built out of the latest tag, and
   `baksmali/smali` 3.0.10 carries no files, so the download 404'd and took the whole build with it.
