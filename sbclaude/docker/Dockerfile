@@ -110,13 +110,21 @@ RUN wget -qO /tmp/d2j.zip \
     && printf '#!/usr/bin/env bash\nexec /opt/dex2jar/d2j-dex2jar.sh "$@"\n' \
         > /usr/local/bin/d2j-dex2jar \
     && chmod +x /usr/local/bin/d2j-dex2jar
-# baksmali + smali fat jars; track the maintained fork's latest release.
+# baksmali + smali fat jars; track the maintained fork's latest release that actually ships them.
+# The asset URL is read from the releases feed rather than built from the latest tag: upstream
+# publishes tags with no assets attached at all (3.0.10 is one), and a URL derived from such a tag
+# 404s, failing the whole image build over a tool most sessions never use. Taking the newest
+# matching asset instead skips an empty or half-published release automatically.
 RUN set -eux; \
-    ver="$(wget -qO- https://api.github.com/repos/baksmali/smali/releases/latest \
-           | grep -oP '"tag_name":\s*"\K[^"]+')"; \
+    releases="$(wget -qO- 'https://api.github.com/repos/baksmali/smali/releases?per_page=20')"; \
     for t in baksmali smali; do \
-        wget -qO "/opt/${t}.jar" \
-          "https://github.com/baksmali/smali/releases/download/${ver}/${t}-${ver}-fat-release.jar"; \
+        url="$(printf '%s' "$releases" | grep -oP '"browser_download_url":\s*"\K[^"]+' \
+               | grep -E "/${t}-[0-9][0-9.]*-fat-release\.jar$" | head -1)"; \
+        if [ -z "$url" ]; then \
+            echo "no ${t} fat-release jar in the last 20 releases" >&2; \
+            exit 1; \
+        fi; \
+        wget -qO "/opt/${t}.jar" "$url"; \
         printf '#!/usr/bin/env bash\nexec java -jar /opt/%s.jar "$@"\n' "$t" > "/usr/local/bin/${t}"; \
         chmod +x "/usr/local/bin/${t}"; \
     done

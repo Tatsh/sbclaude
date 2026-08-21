@@ -24,6 +24,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The image build no longer fails when upstream publishes a release with no assets attached to it.
+  The baksmali and smali jars were fetched from a URL built out of the latest tag, and
+  `baksmali/smali` 3.0.10 carries no files, so the download 404'd and took the whole build with it.
+  The asset URL is now read from the releases feed, which skips an empty or half-published release.
 - `--gpg` could no longer sign once `/run/user/<uid>` existed in the box, which `--wayland` and
   `--ssh` both arrange. The agent socket was overlaid only at `~/.gnupg/S.gpg-agent`, the path
   `gpg` falls back to when it has no usable runtime directory; with one, it looks in
