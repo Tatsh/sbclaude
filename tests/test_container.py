@@ -189,11 +189,48 @@ def test_run_invokes_subprocess(mocker: MockerFixture, tmp_path: Path) -> None:
     assert completed.called
 
 
-def test_shell_invokes_docker(mocker: MockerFixture) -> None:
+def test_shell_invokes_docker_as_mapped_user(mocker: MockerFixture) -> None:
+    ctr = mocker.MagicMock()
+    ctr.attrs = {
+        'Config': {
+            'Env': ['HOST_UID=1234', 'HOST_USER=someone', 'HOST_HOME=/home/someone', 'NOT_A_PAIR']
+        }
+    }
+    client = mocker.MagicMock()
+    client.containers.get.return_value = ctr
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
     completed = mocker.patch('sbclaude.container.sp.run')
     completed.return_value.returncode = 0
     assert container.shell('n') == 0
-    assert completed.call_args[0][0] == ['docker', 'exec', '-it', 'n', 'bash']
+    # No -w: the shell starts in the container's own working directory, the project.
+    assert completed.call_args[0][0] == [
+        'docker', 'exec', '-it', '-u', '1234', '-e', 'HOME=/home/someone', '-e', 'USER=someone',
+        '-e', 'LOGNAME=someone', 'n', 'bash', '-l'
+    ]
+
+
+def test_shell_falls_back_to_host_identity(mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.docker.from_env',
+                 side_effect=docker.errors.DockerException('no daemon'))
+    mocker.patch('sbclaude.container.os.getuid', return_value=4321)
+    mocker.patch('sbclaude.container.getpass.getuser', return_value='hostuser')
+    mocker.patch('sbclaude.container.Path.home', return_value=Path('/home/hostuser'))
+    completed = mocker.patch('sbclaude.container.sp.run')
+    completed.return_value.returncode = 0
+    assert container.shell('n') == 0
+    argv = completed.call_args[0][0]
+    assert argv[argv.index('-u') + 1] == '4321'
+    assert 'HOME=/home/hostuser' in argv
+    assert 'USER=hostuser' in argv
+
+
+def test_shell_root(mocker: MockerFixture) -> None:
+    from_env = mocker.patch('sbclaude.container.docker.from_env')
+    completed = mocker.patch('sbclaude.container.sp.run')
+    completed.return_value.returncode = 0
+    assert container.shell('n', root=True) == 0
+    assert completed.call_args[0][0] == ['docker', 'exec', '-it', 'n', 'bash', '-l']
+    assert not from_env.called
 
 
 def test_list_managed(mocker: MockerFixture) -> None:

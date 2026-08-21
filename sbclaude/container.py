@@ -678,21 +678,60 @@ def run(spec: RunSpec) -> int:
             cleanup.unlink(missing_ok=True)
 
 
-def shell(name: str) -> int:
+def _box_env(name: str) -> dict[str, str]:
+    # The environment the box was started with, which is where the mirrored identity
+    # (HOST_UID/HOST_GID/HOST_USER/HOST_HOME) is recorded.
+    try:
+        env = (_client().containers.get(name).attrs.get('Config') or {}).get('Env') or []
+    except docker.errors.DockerException:
+        return {}
+    return {key: value for key, sep, value in (item.partition('=') for item in env) if sep}
+
+
+def _shell_identity_args(name: str) -> list[str]:
+    # Enter as the identity the box mirrors rather than as root.
+    #
+    # Read back from the container rather than assumed from this process: the box records what it
+    # was started with, which is what its passwd entry was built from. The host's own values are
+    # only a fallback for a box that predates this or was started some other way.
+    #
+    # No -w: the working directory is left as the container's own, which is the project. USER and
+    # LOGNAME are passed explicitly because `docker exec -u` sets neither (it fills in HOME alone,
+    # from the passwd entry), leaving tools that identify the user by environment -- git's
+    # fallback author, gh, the shell prompt -- looking at an empty string.
+    env = _box_env(name)
+    uid = env.get('HOST_UID') or str(os.getuid())
+    user = env.get('HOST_USER') or getpass.getuser()
+    home = env.get('HOST_HOME') or str(Path.home())
+    return ['-u', uid, '-e', f'HOME={home}', '-e', f'USER={user}', '-e', f'LOGNAME={user}']
+
+
+def shell(name: str, *, root: bool = False) -> int:
     """
-    Open a root debug shell inside a running box.
+    Open a debug shell inside a running box.
+
+    The shell runs as the user the box mirrors, in the container's working directory (the
+    project). With ``root``, it runs as root instead; that path never involves privilege
+    escalation inside the box, as the Docker daemon starts the process as root directly.
 
     Parameters
     ----------
     name : str
         The container name.
+    root : bool
+        Open the shell as root instead of the mapped user.
 
     Returns
     -------
     int
         The shell's exit code.
     """
-    return sp.run(['docker', 'exec', '-it', name, 'bash'], check=False).returncode  # noqa: S607
+    identity = [] if root else _shell_identity_args(name)
+    # A login shell so that /etc/profile.d/sbclaude.sh runs and the toolchain (the JDK, the
+    # Android SDK, /opt/venv) is on PATH exactly as it is for the session's own shells.
+    return sp.run(
+        ['docker', 'exec', '-it', *identity, name, 'bash', '-l'],  # noqa: S607
+        check=False).returncode
 
 
 def _client() -> docker.DockerClient:

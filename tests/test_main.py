@@ -377,7 +377,13 @@ def test_shell_default_single(runner: CliRunner, mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.main.container.project_containers', return_value=['sbclaude-p-abc123'])
     shell = mocker.patch('sbclaude.main.container.shell', return_value=0)
     assert runner.invoke(main, ['shell']).exit_code == 0
-    shell.assert_called_once_with('sbclaude-p-abc123')
+    shell.assert_called_once_with('sbclaude-p-abc123', root=False)
+
+
+def test_shell_root(runner: CliRunner, mocker: MockerFixture) -> None:
+    shell = mocker.patch('sbclaude.main.container.shell', return_value=0)
+    assert runner.invoke(main, ['shell', '-n', 'n', '--root']).exit_code == 0
+    shell.assert_called_once_with('n', root=True)
 
 
 def test_shell_default_none(runner: CliRunner, mocker: MockerFixture) -> None:

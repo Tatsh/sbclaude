@@ -21,6 +21,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `scaffold-noclip` writes a project-side visual-regression harness (`viewer-tests/`, baselines,
   and a getting-started guide) driving `webshot`. Existing files are never overwritten without
   `--force`.
+- `sbclaude shell --root` opens the shell as root, which is what `shell` used to do
+  unconditionally.
+
+### Changed
+
+- `sbclaude shell` now opens a login shell as the user the box mirrors, rather than as root. The
+  working directory is unchanged (the project).
 
 ### Fixed
 

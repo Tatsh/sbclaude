@@ -248,8 +248,12 @@ def stop(name: str | None, *, all_: bool) -> None:
 
 @main.command()
 @click.option('-n', '--name', help="Container name. Default: the current project's box.")
-def shell(name: str | None) -> None:
-    """Open a root debug shell inside a running box."""  # noqa: DOC501
+@click.option('--root',
+              'as_root',
+              is_flag=True,
+              help='Open the shell as root instead of the mapped user.')
+def shell(name: str | None, *, as_root: bool) -> None:
+    """Open a debug shell inside a running box, as the user the box mirrors."""  # noqa: DOC501
     target = name
     if target is None:
         names = container.project_containers(Path.cwd().resolve())
@@ -260,7 +264,7 @@ def shell(name: str | None) -> None:
             msg = f'Multiple boxes for this project; pass -n NAME: {", ".join(names)}'
             raise click.ClickException(msg)
         target = names[0]
-    raise SystemExit(container.shell(target))
+    raise SystemExit(container.shell(target, root=as_root))
 
 
 @main.command()

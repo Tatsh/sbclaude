@@ -79,7 +79,8 @@ sbclaude run --re --x11           # Ghidra/Android mounts + GUI passthrough
 sbclaude run -- --version         # everything after -- goes to claude
 sbclaude ls                       # list running sbclaude containers
 sbclaude stop [--all]             # stop this project's boxes (or all with --all)
-sbclaude shell                    # root debug shell in this project's box
+sbclaude shell                    # debug shell in this project's box, as your user
+sbclaude shell --root             # ... as root instead
 sbclaude build [--no-cache]       # (re)build the image
 sbclaude delete-image             # remove the sbclaude image
 sbclaude config                   # show the config file path
