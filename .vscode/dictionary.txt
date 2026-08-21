@@ -56,6 +56,7 @@ esac
 esbenp
 esbonio
 excinfo
+execve
 filevers
 flathub
 fowner
@@ -84,6 +85,7 @@ gpgconf
 gpgsign
 handoff
 hostgid
+hostuser
 hoverxref
 htmlcov
 idevice
@@ -144,6 +146,7 @@ localuser
 lockdownd
 logname
 manylinux
+mknod
 mktemp
 modindex
 monkeypatch
@@ -156,6 +159,7 @@ nodesource
 nodistro
 nonexistent
 noninteractive
+nopasswd
 norecursedirs
 nosystem
 notarytool
@@ -166,15 +170,18 @@ nvml
 onefile
 oneline
 passthrough
+passwordless
 pathlib
 pavelzw
 pinentry
-Pipfile
+pipfile
 pipx
 platformdirs
 plistlib
 pngdefry
 preapproved
+privs
+proc
 prodvers
 pycache
 pydantic
