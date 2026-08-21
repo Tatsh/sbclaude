@@ -95,6 +95,8 @@ class Config:
     """Read-write mount patterns (globs and ``~`` accepted)."""
     ssh: bool = False
     """Whether to mount the host ``~/.ssh`` read-only and forward the ssh-agent socket."""
+    sudo: bool = False
+    """Whether to allow passwordless ``sudo`` in the box (drops ``no-new-privileges``)."""
     usb: bool = False
     """Whether to expose ``/dev/bus/usb`` for adb over USB."""
     wayland: bool = False
@@ -164,6 +166,7 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   rw=_str_list(data.get('rw')),
                   setup_venv=bool(data.get('setup_venv', True)),
                   ssh=bool(data.get('ssh', False)),
+                  sudo=bool(data.get('sudo', False)),
                   usb=bool(data.get('usb', False)),
                   wayland=bool(data.get('wayland', False)),
                   x11=bool(data.get('x11', False)))

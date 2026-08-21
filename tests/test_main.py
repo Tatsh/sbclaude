@@ -150,6 +150,27 @@ def test_run_ssh_gpg_from_config(runner: CliRunner, mocker: MockerFixture) -> No
     assert spec.use_gpg
 
 
+def test_run_sudo_flag(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--sudo'])
+    assert run.call_args[0][0].use_sudo is True
+
+
+def test_run_sudo_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(sudo=True))
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].use_sudo is True
+
+
+def test_run_sudo_off_by_default(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].use_sudo is False
+
+
 def test_run_debian_mirror_flag(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())

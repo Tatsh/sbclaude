@@ -977,6 +977,29 @@ def test_build_run_argv_no_harden(mocker: MockerFixture, tmp_path: Path) -> None
     assert '--cap-drop' not in argv
 
 
+def test_build_run_argv_sudo(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_sudo=True))
+    # sudo's setuid bit is inert under no_new_privs, so the two are mutually exclusive.
+    assert 'no-new-privileges' not in argv
+    assert 'SBCLAUDE_SUDO=1' in argv
+    # The rest of the hardening stays on.
+    assert '--cap-drop' in argv
+    assert '--pids-limit' in argv
+
+
+def test_build_run_argv_no_sudo_by_default(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n'))
+    assert 'SBCLAUDE_SUDO=1' not in argv
+
+
 def test_build_run_argv_memory_explicit(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)

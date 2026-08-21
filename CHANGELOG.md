@@ -21,6 +21,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `scaffold-noclip` writes a project-side visual-regression harness (`viewer-tests/`, baselines,
   and a getting-started guide) driving `webshot`. Existing files are never overwritten without
   `--force`.
+- `--sudo` (config key `sudo`) gives the mapped user passwordless `sudo` in the box, so `sudo su`
+  and `sudo apt-get install` work. It drops `--security-opt no-new-privileges` for that box, which
+  is unavoidable: `no_new_privs` makes the kernel ignore the setuid bit `sudo` depends on. The
+  image now ships `sudo`, still with every setuid bit stripped at build time; the entrypoint
+  restores it on `sudo` alone and only for a `--sudo` box.
 - `sbclaude shell --root` opens the shell as root, which is what `shell` used to do
   unconditionally.
 

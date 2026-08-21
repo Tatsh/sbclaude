@@ -41,10 +41,18 @@ HASH_LABEL = 'sbclaude.context_hash'
 """Docker label storing the build context hash for staleness checks."""
 IMAGE_BASE = 'sbclaude:latest'
 """Tag of the sbclaude image."""
-HARDENING_ARGS = ('--security-opt', 'no-new-privileges', '--cap-drop', 'ALL', '--cap-add', 'CHOWN',
-                  '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER', '--cap-add', 'KILL',
-                  '--cap-add', 'SETUID', '--cap-add', 'SETGID', '--pids-limit', '4096')
+HARDENING_ARGS = ('--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE',
+                  '--cap-add', 'FOWNER', '--cap-add', 'KILL', '--cap-add', 'SETUID', '--cap-add',
+                  'SETGID', '--pids-limit', '4096')
 """Hardening arguments to Docker."""
+NO_NEW_PRIVILEGES_ARGS = ('--security-opt', 'no-new-privileges')
+"""
+Hardening argument barring privilege escalation, dropped by ``--sudo``.
+
+``no_new_privs`` is a latching per-process kernel flag inherited by every child, and once it is
+set the kernel ignores the setuid bit on ``execve``. A setuid-root ``sudo`` is therefore inert
+under it (it says so and exits 1), so passwordless escalation and this flag cannot coexist.
+"""
 USBMUXD_SOCKET = Path('/var/run/usbmuxd')
 """Host usbmuxd socket that frida's usbmux backend uses to reach an iOS device."""
 LOCKDOWN_DIR = Path('/var/lib/lockdown')
@@ -120,6 +128,8 @@ class RunSpec:
     """Whether to enable the reverse-engineering host mounts (Ghidra and Android together)."""
     use_ssh: bool = False
     """Whether to mount the host ``~/.ssh`` read-only and forward the ssh-agent socket."""
+    use_sudo: bool = False
+    """Whether to allow passwordless ``sudo`` in the box (drops ``no-new-privileges``)."""
     use_usb: bool = False
     """Whether to expose ``/dev/bus/usb`` for adb over USB."""
     use_wayland: bool = False
@@ -357,7 +367,11 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     uid, gid, user = os.getuid(), os.getgid(), getpass.getuser()
     image = spec.image or IMAGE_BASE
     tty = ('-i', '-t') if (sys.stdin.isatty() and sys.stdout.isatty()) else ('-i',)
-    hardening = (*HARDENING_ARGS, *_resource_args(spec)) if spec.harden else ()
+    # no-new-privileges is dropped for a --sudo box (and only then): with it set, the kernel
+    # ignores sudo's setuid bit, so escalation is impossible however the box is configured.
+    no_new_privileges = () if spec.use_sudo else NO_NEW_PRIVILEGES_ARGS
+    hardening = ((*no_new_privileges, *HARDENING_ARGS, *_resource_args(spec)) if spec.harden else
+                 ())
     argv = [
         'docker', 'run', '--rm', *tty, '--name', spec.name, *hardening, '--label', f'{LABEL}=1',
         '--label', f'{PROJECT_LABEL}={spec.project}', '--network', spec.network, '-e',
@@ -375,6 +389,10 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     # The entrypoint runs the cc-session-recover installer only when this is set.
     if spec.recover:
         argv += ['-e', 'SBCLAUDE_RECOVER=1']
+    # The entrypoint writes the sudoers drop-in and restores sudo's setuid bit only when this is
+    # set, so a box started without --sudo has no sudo even though the image ships it.
+    if spec.use_sudo:
+        argv += ['-e', 'SBCLAUDE_SUDO=1']
     for key, value in spec.env.items():
         argv += ['-e', f'{key}={value}']
     cleanup: Path | None = None

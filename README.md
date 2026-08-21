@@ -147,6 +147,7 @@ more than one is running).
 | `--x11`             | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator)   |
 | `--ssh`             | mount the host `~/.ssh` read-only and forward the ssh-agent, for SSH git remotes |
 | `--gpg`             | mount the host GnuPG home + agent socket for signing commits                     |
+| `--sudo`            | passwordless `sudo` in the box (drops `no-new-privileges`)                       |
 | `--session-recover` | install `cc-session-recover` (auto-resume) into the project on start             |
 | `--net bridge`      | isolate the box's network (default is `host` — `localhost` = your host)          |
 | `-r/-w/-p/-n/-i`    | extra ro/rw mount, project, container name, image override                       |
@@ -164,6 +165,7 @@ gpg = true       # mount the GnuPG home + agent for signing
 network = "host" # default; "bridge" to isolate the box's network
 re = true        # enable the Ghidra + Android mounts together
 ssh = true       # mount ~/.ssh read-only + forward the ssh-agent for SSH git remotes
+sudo = true      # passwordless sudo in the box (drops no-new-privileges)
 wayland = true   # forward the Wayland socket for GUI apps
 x11 = true       # forward X11 for GUI apps
 # image = "custom:latest"         # force a different image
@@ -179,9 +181,9 @@ rw = []                                            # the project dir is always r
 CLAUDE_CODE_USE_BEDROCK = "1"
 ```
 
-The toggle keys `re`, `ghidra`, `android`, `gpu`, `usb`, `ios`, `wayland`, `x11`, `ssh`, and
-`gpg` mirror the matching `run` flags and default to `false`; setting one is the same as always
-passing that flag.
+The toggle keys `re`, `ghidra`, `android`, `gpu`, `usb`, `ios`, `wayland`, `x11`, `ssh`, `gpg`,
+and `sudo` mirror the matching `run` flags and default to `false`; setting one is the same as
+always passing that flag.
 
 **Debian mirror** — when `deb.debian.org` is slow, point image builds at a faster archive
 mirror with `debian_mirror` (or `--debian-mirror` on `build`/`run`). Only the image's main
@@ -287,6 +289,35 @@ Your `~/.gitconfig` is always mounted read-only, along with every file it pulls 
 `[include] path = ...` directive (resolved with `git config --includes`), so a split config
 carries into the box intact.
 
+## Root inside the box (`--sudo`)
+
+The box runs as **your** mirrored user, and so does `sbclaude shell` — it opens a login shell as
+that user, in the project directory. `sbclaude shell --root` gives a root shell instead; that one
+asks the Docker daemon to start the process as root, so it works on any box, escalating nothing
+inside it.
+
+`sudo` is a different matter, because it is what lets the **agent** become root — to
+`apt-get install` a missing library, say. It is off by default and enabled with `--sudo` (or
+`sudo = true`). The box then gets a `NOPASSWD: ALL` sudoers drop-in for your user, so `sudo su`
+and `sudo <anything>` work without a password:
+
+```sh
+sbclaude run --sudo -p ~/dev/foo   # inside: sudo su, sudo apt-get install ... both work
+```
+
+The catch, and why this is a flag rather than the default: `sudo` is setuid-root, and the
+`no_new_privs` kernel flag that `--security-opt no-new-privileges` sets makes the kernel **ignore**
+the setuid bit on every `execve` — `sudo` detects this and refuses to run. The two cannot coexist,
+so **`--sudo` drops `no-new-privileges`** from the hardening set. Everything else stays: the
+capability set is still `ALL` dropped plus the same six, so container root here has no
+`CAP_SYS_ADMIN`, no `CAP_MKNOD`, and no `CAP_NET_ADMIN`. What it does gain is `CAP_DAC_OVERRIDE`
+over every mounted path, i.e. the file permissions on your read-write mounts stop being a
+boundary. Read-only mounts stay read-only — that is enforced by the kernel, not by permissions.
+
+The image ships `sudo` but still strips **every** setuid bit at build time; the entrypoint
+restores it on `sudo` alone, and only for a box started with `--sudo`. A box started without it
+therefore contains no setuid binary at all.
+
 ## RE toolchain (`--re`)
 
 Mounted from the host (your exact versions): **Ghidra** (`analyzeHeadless`, `ghidraRun`),
@@ -349,7 +380,8 @@ it limits blast radius, it is not a guarantee):
 - **Build time:** minimal Debian slim, `--no-install-recommends` + cleaned apt lists, no
   secrets baked in (the `claude` binary and all auth are bind-mounted), OCI provenance
   labels, and **all setuid/setgid bits stripped** from the image.
-- **Run time:** `--security-opt no-new-privileges`, `--cap-drop ALL` plus only the six
+- **Run time:** `--security-opt no-new-privileges` (unless `--sudo` asked for the opposite —
+  see [Root inside the box](#root-inside-the-box---sudo)), `--cap-drop ALL` plus only the six
   caps the root entrypoint needs to create the mapped user, drop to it via gosu, and let
   `tini` (PID 1) forward signals such as `SIGWINCH` to the non-root child
   (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETUID`, `SETGID`), a `--pids-limit`, a non-root
@@ -371,7 +403,8 @@ drops the resource caps), and add your own Docker flags (e.g. `--read-only`) via
 Still: the containerized Claude can run any command and read/write every mounted path
 without asking, with unrestricted network. Keep writable mounts minimal (the config
 defaults to read-only for everything but the project) and don't mount secrets you don't
-want a fully-autonomous agent to touch. This is why `--ssh` and `--gpg` are opt-in: they
-expose your private SSH and GPG key material (the GnuPG home read-write) to that agent.
-Forwarding an agent socket does not hand over the secret itself, but it does let the box ask
-the host agent to sign with any key it holds, for as long as the box runs.
+want a fully-autonomous agent to touch. This is why `--ssh`, `--gpg`, and `--sudo` are opt-in:
+the first two expose your private SSH and GPG key material (the GnuPG home read-write) to that
+agent, and the third hands it container root. Forwarding an agent socket does not hand over the
+secret itself, but it does let the box ask the host agent to sign with any key it holds, for as
+long as the box runs.

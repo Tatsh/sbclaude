@@ -56,6 +56,38 @@ for _gid in $(id -G); do
     fi
 done
 
+# Passwordless sudo for the mapped user, when sbclaude was started with --sudo.
+#
+# Opt-in, because the box is a no-prompt autonomous agent: whether it can reach container root is
+# a decision for whoever starts the box. The image strips every setuid bit at build time, so
+# sudo's is restored here rather than baked in, which leaves a box started without --sudo with no
+# setuid binary at all. secure_path is overridden with this image's PATH so that the toolchain
+# (the JDK, /opt/venv, /usr/local/bin) resolves under sudo as it does without it; the default
+# would cut it down to the system directories. A drop-in with a syntax error disables sudo
+# altogether, so it is checked and discarded if bad rather than trusted.
+if [ "${SBCLAUDE_SUDO:-0}" = "1" ]; then
+    if ! SUDO_BIN=$(command -v sudo); then
+        echo 'sbclaude: sudo is not installed in this image; --sudo has no effect.' >&2
+    else
+        printf '%s\n' "$USER_NAME ALL=(ALL) NOPASSWD: ALL" "Defaults secure_path=\"$PATH\"" \
+            > /etc/sudoers.d/sbclaude
+        chmod 0440 /etc/sudoers.d/sbclaude
+        if visudo -cqf /etc/sudoers.d/sbclaude >/dev/null 2>&1; then
+            chmod u+s "$SUDO_BIN"
+        else
+            rm -f /etc/sudoers.d/sbclaude
+            echo 'sbclaude: generated sudoers file is invalid; sudo left disabled.' >&2
+        fi
+        # The kernel ignores a setuid bit once no_new_privs is set, and sudo refuses to run at
+        # all. sbclaude omits --security-opt no-new-privileges for a --sudo box, so this only
+        # trips when the box was started some other way; say so up front rather than leave sudo
+        # failing later with a message about container configuration.
+        if grep -qs '^NoNewPrivs:[[:space:]]*1' /proc/self/status; then
+            echo 'sbclaude: no_new_privs is set for this container, so sudo cannot escalate.' >&2
+        fi
+    fi
+fi
+
 # The NVIDIA Container Toolkit injects the driver libraries but does not always install the
 # glvnd/Vulkan manifests that tell the loaders those libraries exist -- leaving libEGL to fall
 # back to Mesa and any GPU-accelerated GL client to crash. Synthesise them when the library is

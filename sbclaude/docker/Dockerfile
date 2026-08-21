@@ -54,6 +54,7 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         qt6-base-dev \
         qt6-base-dev-tools \
         ripgrep \
+        sudo \
         tini \
     && corepack enable yarn \
     && sed -i 's/^# *\(en_GB.UTF-8\)/\1/' /etc/locale.gen && locale-gen \
@@ -212,8 +213,9 @@ RUN chmod 0644 /etc/claude-code/managed-settings.json
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
-# Strip every setuid/setgid bit. Removes setuid-root escalation paths.
+# Strip every setuid/setgid bit, sudo's included. Removes setuid-root escalation paths.
 # Combined with runtime --security-opt no-new-privileges + --cap-drop ALL.
+# The entrypoint restores the bit on sudo alone, and only for a box started with --sudo.
 RUN find / -xdev -type f -perm /6000 -exec chmod a-s {} + 2>/dev/null || true
 # tini as PID 1 -> entrypoint sets up identity and drops privileges via gosu.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]

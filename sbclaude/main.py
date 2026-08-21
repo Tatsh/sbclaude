@@ -78,6 +78,11 @@ def main(ctx: click.Context) -> None:
               'use_gpg',
               is_flag=True,
               help='Mount the host GnuPG home and agent socket for signing commits.')
+@click.option('--sudo',
+              'use_sudo',
+              is_flag=True,
+              help='Allow passwordless sudo in the box. Drops no-new-privileges, without which '
+              'no setuid binary can escalate.')
 @click.option('--net',
               'network',
               help='Docker network mode (default: host; use "bridge" to isolate).')
@@ -119,6 +124,7 @@ def run(
     use_x11: bool,
     use_ssh: bool,
     use_gpg: bool,
+    use_sudo: bool,
     no_harden: bool,
     session_recover: bool,
     debug: bool,
@@ -137,6 +143,7 @@ def run(
     use_x11 = use_x11 or cfg.x11
     use_ssh = use_ssh or cfg.ssh
     use_gpg = use_gpg or cfg.gpg
+    use_sudo = use_sudo or cfg.sudo
     debian_mirror = debian_mirror or cfg.debian_mirror
     memory = memory or cfg.memory
     cpus = cpus or cfg.cpus
@@ -155,6 +162,7 @@ def run(
                              use_x11=use_x11,
                              use_ssh=use_ssh,
                              use_gpg=use_gpg,
+                             use_sudo=use_sudo,
                              ro=[*expand_paths(cfg.ro), *expand_paths(ro_extra)],
                              rw=[*expand_paths(cfg.rw), *expand_paths(rw_extra)],
                              env=_resolve_env(cfg, proj, env_extra),

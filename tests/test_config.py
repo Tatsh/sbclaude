@@ -172,6 +172,13 @@ def test_load_config_env(tmp_path: Path) -> None:
     assert cfg.pass_env == ['AWS_PROFILE']
 
 
+def test_load_config_sudo(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nsudo = true\n')
+    assert load_config(path).sudo is True
+    assert load_config(tmp_path / 'missing.toml').sudo is False
+
+
 def test_load_config_harden_and_docker_args(tmp_path: Path) -> None:
     path = tmp_path / 'config.toml'
     path.write_text('[tool.sbclaude]\nharden = false\ndocker_args = ["--memory", "2g"]\n')
