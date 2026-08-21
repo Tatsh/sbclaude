@@ -27,7 +27,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "SBCLAUDE" "1" "Aug 07, 2026" "0.0.1" "sbclaude"
+.TH "SBCLAUDE" "1" "Aug 21, 2026" "0.0.1" "sbclaude"
 .SH NAME
 sbclaude \- sbclaude v0.0.1
 .sp
@@ -206,6 +206,11 @@ Mount the host usbmuxd socket so frida can reach an iOS device.
 .UNINDENT
 .INDENT 0.0
 .TP
+.B \-\-wayland
+Forward the Wayland socket for GUIs (preferred over \-\-x11).
+.UNINDENT
+.INDENT 0.0
+.TP
 .B \-\-x11
 Forward DISPLAY + XAUTHORITY for GUIs.
 .UNINDENT
@@ -218,6 +223,11 @@ Mount the host ~/.ssh read\-only and forward the ssh\-agent for SSH git remotes.
 .TP
 .B \-\-gpg
 Mount the host GnuPG home and agent socket for signing commits.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-sudo
+Allow passwordless sudo in the box. Drops no\-new\-privileges, without which no setuid binary can escalate.
 .UNINDENT
 .INDENT 0.0
 .TP
@@ -251,9 +261,45 @@ Arguments
 .B CLAUDE_ARGS
 Optional argument(s)
 .UNINDENT
+.SS scaffold\-noclip
+.sp
+Scaffold a noclip visual\-regression harness into TARGET (default: the current directory).
+.sp
+Writes viewer\-tests/ (glue, config, baselines/, out/) plus a getting\-started guide. The
+\fBwebshot\fP tool it drives is already installed in the box. Other harnesses, if they are ever
+added, get their own \fBscaffold\-<kind>\fP command rather than a flag on this one.
+.sp
+Usage
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+sbclaude scaffold\-noclip [OPTIONS] [TARGET]
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+Options
+.INDENT 0.0
+.TP
+.B \-f, \-\-force
+Overwrite files that already exist.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-s, \-\-scene <scene>
+Scene id for the generated config, e.g. MyGame/Level1.
+.UNINDENT
+.sp
+Arguments
+.INDENT 0.0
+.TP
+.B TARGET
+Optional argument
+.UNINDENT
 .SS shell
 .sp
-Open a root debug shell inside a running box.
+Open a debug shell inside a running box, as the user the box mirrors.
 .sp
 Usage
 .INDENT 0.0
@@ -270,6 +316,11 @@ Options
 .TP
 .B \-n, \-\-name <name>
 Container name. Default: the current project\(aqs box.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-root
+Open the shell as root instead of the mapped user.
 .UNINDENT
 .SS stop
 .sp
