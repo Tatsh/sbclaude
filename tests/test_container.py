@@ -76,6 +76,19 @@ def test_exclude_venv_from_git_without_a_repository(tmp_path: Path) -> None:
     assert container.exclude_venv_from_git(tmp_path) is False
 
 
+def test_exclude_venv_from_git_unreadable(tmp_path: Path, mocker: MockerFixture) -> None:
+    (tmp_path / '.git').mkdir()
+    (tmp_path / '.gitignore').write_text('node_modules/\n')
+    mocker.patch('sbclaude.container.Path.read_text', side_effect=OSError('denied'))
+    assert container.exclude_venv_from_git(tmp_path) is False
+
+
+def test_exclude_venv_from_git_unwritable(tmp_path: Path, mocker: MockerFixture) -> None:
+    (tmp_path / '.git').mkdir()
+    mocker.patch('sbclaude.container.Path.open', side_effect=OSError('read-only file system'))
+    assert container.exclude_venv_from_git(tmp_path) is False
+
+
 def test_claude_binary_missing(mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.container.which', return_value=None)
     with pytest.raises(FileNotFoundError):

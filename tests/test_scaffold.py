@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
+from typing import TYPE_CHECKING
 import json
 import os
 import stat
 
 from sbclaude.scaffold import DEFAULT_SCENE, SCENE_PLACEHOLDER, scaffold
 import pytest
+
+if TYPE_CHECKING:
+    from pytest_mock import MockerFixture
 
 
 def test_scaffold_writes_the_harness(tmp_path: Path) -> None:
@@ -22,6 +27,18 @@ def test_scaffold_writes_the_harness(tmp_path: Path) -> None:
     # Both directories must exist before the first capture.
     assert (tmp_path / 'viewer-tests' / 'baselines').is_dir()
     assert (tmp_path / 'viewer-tests' / 'out').is_dir()
+
+
+def test_scaffold_ignores_directories_in_the_template(tmp_path: Path,
+                                                      mocker: MockerFixture) -> None:
+    templates = tmp_path / 'templates'
+    (templates / 'a-directory').mkdir(parents=True)
+    (templates / 'views.json').write_text(f'{{"scene": "{SCENE_PLACEHOLDER}"}}\n')
+    mocker.patch('sbclaude.scaffold.resources.as_file', return_value=nullcontext(templates))
+    target = tmp_path / 'proj'
+    result = scaffold(target)
+    assert [p.name for p in result.written] == ['views.json']
+    assert not (target / 'viewer-tests' / 'a-directory').exists()
 
 
 def test_scaffold_creates_a_missing_target(tmp_path: Path) -> None:
