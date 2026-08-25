@@ -5,12 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import docker.errors
+import pytest
+
 from sbclaude import container
 from sbclaude.config import Config
 from sbclaude.main import main
 from sbclaude.scaffold import ScaffoldResult
-import docker.errors
-import pytest
 
 if TYPE_CHECKING:
     from click.testing import CliRunner
@@ -239,6 +240,99 @@ def test_run_excludes_the_box_venv_from_git(runner: CliRunner, mocker: MockerFix
     exclude = mocker.patch('sbclaude.main.container.exclude_venv_from_git')
     runner.invoke(main, ['run'])
     exclude.assert_called_once()
+
+
+@pytest.mark.parametrize(('args', 'cfg_modify'), [(['run', '--no-modify'], True), (['run'], False)])
+def test_run_no_modify_keeps_the_venv_out_of_the_project(args: list[str], runner: CliRunner,
+                                                         mocker: MockerFixture, *,
+                                                         cfg_modify: bool) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(modify=cfg_modify))
+    runner.invoke(main, args)
+    spec = run.call_args[0][0]
+    assert spec.env['SBCLAUDE_VENV'] == container.transient_uv_project_environment(spec.project)
+    assert spec.env['UV_PROJECT_ENVIRONMENT'] == spec.env['SBCLAUDE_VENV']
+    assert not spec.env['SBCLAUDE_VENV'].startswith(str(spec.project))
+
+
+@pytest.mark.parametrize(('args', 'cfg_modify'), [(['run', '--no-modify'], True), (['run'], False)])
+def test_run_no_modify_leaves_gitignore_alone(args: list[str], runner: CliRunner,
+                                              mocker: MockerFixture, *, cfg_modify: bool) -> None:
+    mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(modify=cfg_modify))
+    exclude = mocker.patch('sbclaude.main.container.exclude_venv_from_git')
+    result = runner.invoke(main, args)
+    assert result.exit_code == 0
+    exclude.assert_not_called()
+
+
+@pytest.mark.parametrize(('args', 'cfg_venv_dir'), [(['run', '--venv-dir', '/venv-cache'], None),
+                                                    (['run'], '/venv-cache')])
+def test_run_venv_dir_puts_the_venv_under_it(args: list[str], cfg_venv_dir: str | None,
+                                             runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(venv_dir=cfg_venv_dir))
+    exclude = mocker.patch('sbclaude.main.container.exclude_venv_from_git')
+    runner.invoke(main, args)
+    spec = run.call_args[0][0]
+    expected = container.uv_project_environment_in('/venv-cache', spec.project)
+    assert spec.env['SBCLAUDE_VENV'] == expected
+    assert spec.env['UV_PROJECT_ENVIRONMENT'] == expected
+    exclude.assert_not_called()
+
+
+def test_run_venv_dir_flag_beats_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(venv_dir='/from/config'))
+    runner.invoke(main, ['run', '--venv-dir', '/from/flag'])
+    assert run.call_args[0][0].env['SBCLAUDE_VENV'].startswith('/from/flag/')
+
+
+def test_run_venv_dir_applies_without_manage_uv_env(runner: CliRunner,
+                                                    mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(manage_uv_env=False))
+    runner.invoke(main, ['run', '--venv-dir', '/venv-cache'])
+    assert run.call_args[0][0].env['SBCLAUDE_VENV'].startswith('/venv-cache/')
+
+
+def test_run_venv_dir_survives_no_modify(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--venv-dir', '/venv-cache', '--no-modify'])
+    env = run.call_args[0][0].env
+    assert env['SBCLAUDE_VENV'].startswith('/venv-cache/')
+    assert env['SBCLAUDE_SETUP_VENV'] == '0'
+
+
+@pytest.mark.parametrize('args', [['run'], ['run', '--venv-dir', '/venv-cache']])
+def test_run_without_python_gets_no_venv(args: list[str], runner: CliRunner, tmp_path: Path,
+                                         mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    exclude = mocker.patch('sbclaude.main.container.exclude_venv_from_git')
+    (tmp_path / 'index.ts').write_text('')
+    runner.invoke(main, [*args, '-p', str(tmp_path)])
+    env = run.call_args[0][0].env
+    assert 'SBCLAUDE_VENV' not in env
+    assert 'UV_PROJECT_ENVIRONMENT' not in env
+    assert 'SBCLAUDE_SETUP_VENV' not in env
+    exclude.assert_not_called()
+
+
+def test_run_no_modify_skips_venv_provisioning(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--no-modify'])
+    assert run.call_args[0][0].env['SBCLAUDE_SETUP_VENV'] == '0'
+
+
+def test_run_no_modify_disables_session_recovery(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    result = runner.invoke(main, ['run', '--no-modify', '--session-recover'])
+    assert run.call_args[0][0].recover is False
+    assert 'session recovery' in result.output
 
 
 @pytest.mark.parametrize(('setup_venv', 'expected'), [(True, '1'), (False, '0')])

@@ -27,7 +27,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "SBCLAUDE" "1" "Aug 21, 2026" "0.0.1" "sbclaude"
+.TH "SBCLAUDE" "1" "Aug 25, 2026" "0.0.1" "sbclaude"
 .SH NAME
 sbclaude \- sbclaude v0.0.1
 .sp
@@ -241,8 +241,18 @@ Extra env var KEY=VALUE for the box, e.g. \-e CLAUDE_CODE_USE_BEDROCK=1.
 .UNINDENT
 .INDENT 0.0
 .TP
+.B \-\-venv\-dir <venv_dir>
+Directory in the box holding its virtualenv, e.g. a volume\(aqs mount point. Default: .sbclaude\-venv beside a Python project.
+.UNINDENT
+.INDENT 0.0
+.TP
 .B \-\-no\-harden
 Disable the container hardening flags (cap\-drop, no\-new\-privileges, ...).
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-no\-modify
+Stop sbclaude writing anything into the project directory: no .gitignore entry, no virtualenv beside it, and no session\-recover install. Claude itself can still edit the project.
 .UNINDENT
 .INDENT 0.0
 .TP

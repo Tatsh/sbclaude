@@ -28,11 +28,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   restores it on `sudo` alone and only for a `--sudo` box.
 - `sbclaude shell --root` opens the shell as root, which is what `shell` used to do
   unconditionally.
+- `--venv-dir DIR` (config key `venv_dir`) holds the box's virtualenv in `DIR` rather than beside
+  the project, so pairing it with a volume in `docker_args` keeps the environment across boxes
+  without writing into the project. One subdirectory per project, suffixed with a digest of its
+  absolute path so a shared volume cannot mix up two projects of the same name; the entrypoint
+  creates it and hands it to the mapped user, which is what makes a fresh named volume usable.
+- `--no-modify` (config key `modify`) stops sbclaude writing into the project directory: no
+  `/.sbclaude-venv/` line appended to `.gitignore`, the box's virtualenv redirected to
+  `/tmp/sbclaude-venv-<project>` inside the container, no start-up `uv sync` (it refreshes
+  `uv.lock`), and no `cc-session-recover` install. It constrains sbclaude only — the project is
+  still mounted read-write for Claude itself.
 
 ### Changed
 
 - `sbclaude shell` now opens a login shell as the user the box mirrors, rather than as root. The
   working directory is unchanged (the project).
+- The box's virtualenv is only set up for a project that actually contains Python (a
+  `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, or `Pipfile` at the top, or a
+  `.py` file anywhere below it). Other projects no longer get a `.sbclaude-venv` directory, a
+  `.gitignore` line, or any of the virtualenv environment variables.
 
 ### Fixed
 

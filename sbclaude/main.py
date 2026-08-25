@@ -91,10 +91,19 @@ def main(ctx: click.Context) -> None:
               'env_extra',
               multiple=True,
               help='Extra env var KEY=VALUE for the box, e.g. -e CLAUDE_CODE_USE_BEDROCK=1.')
+@click.option('--venv-dir',
+              help="Directory in the box holding its virtualenv, e.g. a volume's mount point. "
+              'Default: .sbclaude-venv beside a Python project.')
 @click.option('--no-harden',
               'no_harden',
               is_flag=True,
               help='Disable the container hardening flags (cap-drop, no-new-privileges, ...).')
+@click.option('--no-modify',
+              'no_modify',
+              is_flag=True,
+              help='Stop sbclaude writing anything into the project directory: no .gitignore '
+              'entry, no virtualenv beside it, and no session-recover install. Claude itself can '
+              'still edit the project.')
 @click.option('--session-recover',
               'session_recover',
               is_flag=True,
@@ -112,6 +121,7 @@ def run(
     debian_mirror: str | None,
     memory: str | None,
     cpus: str | None,
+    venv_dir: str | None,
     claude_args: tuple[str, ...],
     *,
     use_re: bool,
@@ -126,6 +136,7 @@ def run(
     use_gpg: bool,
     use_sudo: bool,
     no_harden: bool,
+    no_modify: bool,
     session_recover: bool,
     debug: bool,
 ) -> None:
@@ -147,7 +158,14 @@ def run(
     debian_mirror = debian_mirror or cfg.debian_mirror
     memory = memory or cfg.memory
     cpus = cpus or cfg.cpus
+    modify = cfg.modify and not no_modify
     session_recover = session_recover or cfg.recover
+    if session_recover and not modify:
+        click.echo(
+            'sbclaude: session recovery installs itself into the project, so it is skipped '
+            'while writes to the project are disabled.',
+            err=True)
+        session_recover = False
     spec = container.RunSpec(project=proj,
                              name=name or container.unique_name(proj),
                              network=network or cfg.network,
@@ -165,7 +183,11 @@ def run(
                              use_sudo=use_sudo,
                              ro=[*expand_paths(cfg.ro), *expand_paths(ro_extra)],
                              rw=[*expand_paths(cfg.rw), *expand_paths(rw_extra)],
-                             env=_resolve_env(cfg, proj, env_extra),
+                             env=_resolve_env(cfg,
+                                              proj,
+                                              env_extra,
+                                              modify=modify,
+                                              venv_dir=venv_dir or cfg.venv_dir),
                              harden=cfg.harden and not no_harden,
                              memory=memory,
                              cpus=cpus,
@@ -179,7 +201,8 @@ def run(
         raise click.ClickException(str(e)) from e
 
 
-def _resolve_env(cfg: Config, proj: Path, env_extra: tuple[str, ...]) -> dict[str, str]:
+def _resolve_env(cfg: Config, proj: Path, env_extra: tuple[str, ...], *, modify: bool,
+                 venv_dir: str | None) -> dict[str, str]:
     """
     Resolve the box's environment from config layers and ``-e`` overrides.
 
@@ -194,6 +217,10 @@ def _resolve_env(cfg: Config, proj: Path, env_extra: tuple[str, ...]) -> dict[st
         The resolved project directory.
     env_extra : tuple[str, ...]
         ``KEY=VALUE`` strings from ``-e`` flags.
+    modify : bool
+        Whether sbclaude may write into the project directory.
+    venv_dir : str | None
+        Directory in the box to hold its virtualenv, or ``None`` to keep it beside the project.
 
     Returns
     -------
@@ -206,16 +233,37 @@ def _resolve_env(cfg: Config, proj: Path, env_extra: tuple[str, ...]) -> dict[st
         If a ``-e`` value is not ``KEY=VALUE``.
     """
     env: dict[str, str] = {}
-    if cfg.manage_uv_env:
-        # Relative, deliberately: uv resolves it against whichever project it is working on, so
-        # every project the box touches gets its own virtualenv beside its own pyproject.toml. An
-        # absolute path here would funnel a `uv sync` run in any second project into the first
-        # project's environment and quietly replace its packages.
-        env['UV_PROJECT_ENVIRONMENT'] = container.VENV_DIR_NAME
-        # Absolute, because the entrypoint provisions this one and puts its bin directory on PATH.
-        env['SBCLAUDE_VENV'] = container.uv_project_environment(proj)
-        env['SBCLAUDE_SETUP_VENV'] = '1' if cfg.setup_venv else '0'
-        container.exclude_venv_from_git(proj)
+    # An explicit directory counts as asking for the box's virtualenv to be managed, even where
+    # manage_uv_env turned that off, since the only way to honour it is to set the variables. A
+    # project with no Python in it gets none of this: no directory beside it, no .gitignore line,
+    # and venv_dir has nothing to hold.
+    if (cfg.manage_uv_env or venv_dir) and container.is_python_project(proj):
+        if venv_dir:
+            # Absolute, so it escapes the project; per project inside that directory, so one
+            # mounted volume can serve every project without them sharing an environment.
+            venv = container.uv_project_environment_in(venv_dir, proj)
+            env['SBCLAUDE_VENV'] = venv
+            env['UV_PROJECT_ENVIRONMENT'] = venv
+        elif modify:
+            # Relative, deliberately: uv resolves it against whichever project it is working on,
+            # so every project the box touches gets its own virtualenv beside its own
+            # pyproject.toml. An absolute path here would funnel a `uv sync` run in any second
+            # project into the first project's environment and quietly replace its packages.
+            env['UV_PROJECT_ENVIRONMENT'] = container.VENV_DIR_NAME
+            # Absolute, because the entrypoint provisions this one and puts its bin directory on
+            # PATH.
+            env['SBCLAUDE_VENV'] = container.uv_project_environment(proj)
+            container.exclude_venv_from_git(proj)
+        else:
+            # Absolute and inside the container, because a relative path would put uv's
+            # environment back in the project. Every project the box touches then shares this one,
+            # which is the price of creating nothing beside them.
+            venv = container.transient_uv_project_environment(proj)
+            env['SBCLAUDE_VENV'] = venv
+            env['UV_PROJECT_ENVIRONMENT'] = venv
+        # Provisioning runs `uv sync`, which refreshes the project's uv.lock, so it is a write to
+        # the project even when the virtualenv itself lands elsewhere.
+        env['SBCLAUDE_SETUP_VENV'] = '1' if cfg.setup_venv and modify else '0'
     env.update(cfg.env)
     env.update({k: os.environ[k] for k in (*DEFAULT_PASS_ENV, *cfg.pass_env) if k in os.environ})
     for item in env_extra:

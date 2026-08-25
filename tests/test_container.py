@@ -9,9 +9,10 @@ import os
 import subprocess as sp
 import tempfile
 
-from sbclaude import container
 import docker.errors
 import pytest
+
+from sbclaude import container
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
@@ -34,6 +35,51 @@ def test_uv_project_environment() -> None:
 def test_uv_project_environment_is_never_the_host_venv() -> None:
     project = Path('/a/b/proj')
     assert container.uv_project_environment(project) != str(project / '.venv')
+
+
+def test_transient_uv_project_environment_is_outside_the_project() -> None:
+    project = Path('/a/b/My Proj')
+    value = container.transient_uv_project_environment(project)
+    assert Path(value).is_absolute()
+    assert not value.startswith(str(project))
+    assert value.startswith('/tmp/sbclaude-venv-My-Proj-')  # noqa: S108
+
+
+def test_uv_project_environment_in_is_under_the_given_directory() -> None:
+    value = container.uv_project_environment_in('/venv-cache/', Path('/a/b/My Proj'))
+    assert value.startswith('/venv-cache/sbclaude-venv-My-Proj-')
+    assert Path(value).parent == Path('/venv-cache')
+
+
+def test_uv_project_environment_in_separates_same_named_projects() -> None:
+    directory = '/venv-cache'
+    assert (container.uv_project_environment_in(directory, Path('/a/foo'))
+            != container.uv_project_environment_in(directory, Path('/b/foo')))
+
+
+@pytest.mark.parametrize('marker', ['pyproject.toml', 'setup.py', 'requirements.txt'])
+def test_is_python_project_by_marker(marker: str, tmp_path: Path) -> None:
+    (tmp_path / marker).write_text('')
+    assert container.is_python_project(tmp_path) is True
+
+
+def test_is_python_project_by_nested_source_file(tmp_path: Path) -> None:
+    (tmp_path / 'src' / 'pkg').mkdir(parents=True)
+    (tmp_path / 'src' / 'pkg' / 'thing.py').write_text('')
+    assert container.is_python_project(tmp_path) is True
+
+
+def test_is_python_project_without_python(tmp_path: Path) -> None:
+    (tmp_path / 'src').mkdir()
+    (tmp_path / 'src' / 'index.ts').write_text('')
+    assert container.is_python_project(tmp_path) is False
+
+
+def test_is_python_project_ignores_dependency_trees(tmp_path: Path) -> None:
+    for directory in ('node_modules', '.git'):
+        (tmp_path / directory / 'dep').mkdir(parents=True)
+        (tmp_path / directory / 'dep' / 'thing.py').write_text('')
+    assert container.is_python_project(tmp_path) is False
 
 
 def test_host_venv_mounted_read_only(tmp_path: Path, mocker: MockerFixture) -> None:

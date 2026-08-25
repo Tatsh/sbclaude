@@ -76,11 +76,23 @@ class Config:
     ios: bool = False
     """Whether to mount the host usbmuxd socket so frida can reach an iOS device."""
     manage_uv_env: bool = True
-    """Whether to give the box its own virtualenv instead of the project's ``.venv``."""
+    """
+    Whether to give the box its own virtualenv instead of the project's ``.venv``.
+
+    Only a project that looks like Python gets one. Setting ``venv_dir`` manages the environment
+    even where this is false, since naming a directory is asking for one.
+    """
     setup_venv: bool = True
-    """Whether the box provisions that virtualenv on start when the project looks like Python."""
+    """
+    Whether the box provisions that virtualenv on start when the project looks like Python.
+
+    Provisioning runs ``uv sync``, which refreshes the project's ``uv.lock``, so ``modify = false``
+    suppresses it regardless of this setting.
+    """
     memory: str | None = None
     """Docker memory limit (e.g. ``8g``); ``None`` auto-caps from host RAM, ``0`` disables."""
+    modify: bool = True
+    """Whether sbclaude itself may write into the project directory."""
     network: str = DEFAULT_NETWORK
     """Docker network mode."""
     pass_env: list[str] = field(default_factory=list)
@@ -99,6 +111,14 @@ class Config:
     """Whether to allow passwordless ``sudo`` in the box (drops ``no-new-privileges``)."""
     usb: bool = False
     """Whether to expose ``/dev/bus/usb`` for adb over USB."""
+    venv_dir: str | None = None
+    """
+    Directory inside the box holding its virtualenv, or ``None`` to keep it beside the project.
+
+    Point this at a mounted volume (via ``docker_args``) to keep the environment across boxes
+    without writing anything into the project. With ``None`` and ``modify = false`` the virtualenv
+    lands inside the container instead, and does not survive it.
+    """
     wayland: bool = False
     """Whether to forward the Wayland compositor socket."""
     x11: bool = False
@@ -158,6 +178,7 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   ios=bool(data.get('ios', False)),
                   manage_uv_env=bool(data.get('manage_uv_env', True)),
                   memory=(str(data['memory']) if data.get('memory') is not None else None),
+                  modify=bool(data.get('modify', True)),
                   network=str(data.get('network', DEFAULT_NETWORK)),
                   pass_env=_str_list(data.get('pass_env')),
                   re=bool(data.get('re', False)),
@@ -168,6 +189,7 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   ssh=bool(data.get('ssh', False)),
                   sudo=bool(data.get('sudo', False)),
                   usb=bool(data.get('usb', False)),
+                  venv_dir=(str(data['venv_dir']) if data.get('venv_dir') else None),
                   wayland=bool(data.get('wayland', False)),
                   x11=bool(data.get('x11', False)))
 

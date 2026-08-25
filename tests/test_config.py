@@ -70,6 +70,30 @@ def test_load_config_manage_uv_env_false(tmp_path: Path) -> None:
     assert load_config(path).manage_uv_env is False
 
 
+def test_load_config_modify_default_true(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    assert load_config(path).modify is True
+
+
+def test_load_config_modify_false(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nmodify = false\n')
+    assert load_config(path).modify is False
+
+
+def test_load_config_venv_dir_default_none(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    assert load_config(path).venv_dir is None
+
+
+def test_load_config_venv_dir(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nvenv_dir = "/venv-cache"\n')
+    assert load_config(path).venv_dir == '/venv-cache'
+
+
 def test_load_config_memory_cpus(tmp_path: Path) -> None:
     path = tmp_path / 'config.toml'
     path.write_text('[tool.sbclaude]\nmemory = "8g"\ncpus = "4"\n')

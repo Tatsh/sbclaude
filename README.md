@@ -148,6 +148,8 @@ more than one is running).
 | `--ssh`             | mount the host `~/.ssh` read-only and forward the ssh-agent, for SSH git remotes |
 | `--gpg`             | mount the host GnuPG home + agent socket for signing commits                     |
 | `--sudo`            | passwordless `sudo` in the box (drops `no-new-privileges`)                       |
+| `--venv-dir DIR`    | put the box's virtualenv in `DIR` (e.g. a volume) instead of beside the project  |
+| `--no-modify`       | stop sbclaude writing anything into the project directory                        |
 | `--session-recover` | install `cc-session-recover` (auto-resume) into the project on start             |
 | `--net bridge`      | isolate the box's network (default is `host` — `localhost` = your host)          |
 | `-r/-w/-p/-n/-i`    | extra ro/rw mount, project, container name, image override                       |
@@ -173,6 +175,8 @@ x11 = true       # forward X11 for GUI apps
 # memory = "8g"                   # override the auto host-RAM cap ("0" disables)
 # cpus = "4"                      # cap CPUs (uncapped by default)
 # recover = true                  # install cc-session-recover into every project (off by default)
+# modify = false                  # never write into the project directory (same as --no-modify)
+# venv_dir = "/venv-cache"        # hold the box's virtualenv here (pair with a docker_args volume)
 pass_env = ["AWS_REGION"]                          # forward host vars (AWS_PROFILE is default)
 ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"] # read-only mounts (globs + ~ ok)
 rw = []                                            # the project dir is always rw automatically
@@ -202,16 +206,57 @@ you point the box at a different backend such as **Amazon Bedrock**
 (`CLAUDE_CODE_USE_BEDROCK=1` + your `AWS_*` vars; mount `~/.aws` via `ro` if you use
 profiles).
 
-**uv project environment** — by default the box sets `UV_PROJECT_ENVIRONMENT` to a
-container-local path (`/tmp/sbclaude-uv-<project>`), so `uv sync`/`uv run` build the
-virtualenv there instead of writing `.venv` into your bind-mounted project. A host-built
-`.venv` hard-codes the host interpreter path and would not resolve in the box anyway; the
-container is throwaway, so the redirected env is rebuilt per run. Override it by setting
-your own `UV_PROJECT_ENVIRONMENT` (via `[env]` or `-e`), or disable the behaviour entirely
-with `manage_uv_env = false`. There is no clean equivalent for Node — `node_modules` is
-fixed to the package root by Node's resolver (only Yarn Berry's `YARN_NODE_LINKER=pnp`
-removes it, at the cost of changing module resolution), and `node_modules` built on the
-box's Linux is usually reusable on a Linux host anyway, so it is left untouched.
+**uv project environment** — by default the box sets `UV_PROJECT_ENVIRONMENT` to
+`.sbclaude-venv`, so `uv sync`/`uv run` build the virtualenv there instead of writing `.venv`
+into your bind-mounted project. A host-built `.venv` hard-codes the host interpreter path and
+would not resolve in the box anyway, so the two are kept apart; the host's `.venv` is
+additionally re-mounted read-only so nothing in the box can corrupt it. Beside the project
+rather than inside the container because the container is `--rm`, so a virtualenv in it would
+be rebuilt from nothing every run. `/.sbclaude-venv/` is appended to the project's `.gitignore`
+(once, and only when it is not already there) so it stays out of `git status`. Override the
+path with `venv_dir` (below) or by setting your own `UV_PROJECT_ENVIRONMENT` (via `[env]` or
+`-e`), or disable the behaviour entirely with `manage_uv_env = false`.
+
+None of it happens unless the project **is** a Python one: a `pyproject.toml`, `setup.py`,
+`setup.cfg`, `requirements.txt`, or `Pipfile` at the top, or a `.py` file anywhere below it
+(ignoring dotted directories, `node_modules`, `vendor`, and `target`). A project with no Python
+in it gets no `.sbclaude-venv`, no `.gitignore` line, and no virtualenv variables at all.
+
+There is no clean equivalent for Node — `node_modules` is fixed to the package root by Node's
+resolver (only Yarn Berry's `YARN_NODE_LINKER=pnp` removes it, at the cost of changing module
+resolution), and `node_modules` built on the box's Linux is usually reusable on a Linux host
+anyway, so it is left untouched.
+
+**A virtualenv that outlives the box** — `--venv-dir DIR` (config key `venv_dir`) puts the box's
+virtualenv in `DIR` instead of beside the project. Combined with a volume in `docker_args`, the
+environment survives the box without anything being written into the project:
+
+```toml
+[tool.sbclaude]
+docker_args = ["-v", "sbclaude-venv-cache:/venv-cache"]
+venv_dir = "/venv-cache"
+```
+
+`DIR` gets one subdirectory per project, named after it with a digest of its absolute path
+appended (`/venv-cache/sbclaude-venv-foo-1a2b3c`), so a single volume serves every project and
+`~/dev/foo` and `~/work/foo` do not end up sharing an environment. The directory is created and
+handed to your user by the entrypoint, which is what makes a fresh (root-owned) named volume
+usable. `venv_dir` applies even with `manage_uv_env = false` — naming a directory is asking for
+the environment to be managed — but not to a project with no Python in it.
+
+**Leaving the project untouched** — `--no-modify` (or `modify = false`) stops sbclaude itself
+writing anything into the directory it was launched from. Three things are suppressed:
+
+- the `/.sbclaude-venv/` line is not appended to `.gitignore`;
+- `UV_PROJECT_ENVIRONMENT` points inside the container instead of beside the project, so neither
+  sbclaude nor a later `uv sync` creates a virtualenv there. That path is under `/tmp` and dies
+  with the box, unless `venv_dir` names somewhere that persists;
+- the start-up `uv sync` is skipped (it refreshes `uv.lock`), as is the `cc-session-recover`
+  install, which writes into `.claude/` and `HANDOFF.md`. Asking for both `--session-recover` and
+  `--no-modify` prints a note and leaves recovery off.
+
+This constrains **sbclaude**, not Claude: the project is still bind-mounted read-write and the
+agent can edit it exactly as before.
 
 **Alternate config dir** — if `CLAUDE_CONFIG_DIR` is set on the host, sbclaude mounts that
 directory (its `.claude.json`, `settings.json`, history) and points claude at it inside the

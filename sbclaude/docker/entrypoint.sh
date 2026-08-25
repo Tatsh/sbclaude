@@ -173,10 +173,25 @@ export PATH="$HOST_HOME/.local/bin:$PATH"
 # The host's .venv is mounted read-only and is useless in here anyway: a virtualenv hard-codes the
 # absolute path of the interpreter it was built against, and the host's does not exist in this
 # image. Building our own at a different path is what keeps the two from destroying each other.
-# SBCLAUDE_VENV is set by sbclaude and lives beside the project so it survives --rm.
+# SBCLAUDE_VENV is set by sbclaude, only for a project with Python in it, and by default lives
+# beside the project so it survives --rm. It may also point elsewhere in the container, which is
+# how a mounted volume gives it persistence without writing into the project.
 #
 # Best-effort: a project whose dependencies cannot be resolved here (a package needing host
 # headers, say) must still get a session, so a failure warns and carries on.
+if [ -n "${SBCLAUDE_VENV:-}" ]; then
+    # A path outside the project is usually a volume, which Docker creates owned by root. Create
+    # the directory here, while still root, and hand it to the mapped user; otherwise every write
+    # below (and every later `uv sync`) is denied. Ownership is changed on the directory alone, so
+    # an environment left by an earlier box is not walked over on every start.
+    case $SBCLAUDE_VENV in
+    "$PWD"/*) ;;
+    *)
+        mkdir -p "$SBCLAUDE_VENV" && chown "$HOST_UID:$HOST_GID" "$SBCLAUDE_VENV" ||
+            echo "sbclaude: could not prepare $SBCLAUDE_VENV; continuing without it." >&2
+        ;;
+    esac
+fi
 if [ -n "${SBCLAUDE_VENV:-}" ] && [ "${SBCLAUDE_SETUP_VENV:-1}" = "1" ]; then
     venv_marker=''
     for candidate in pyproject.toml setup.py setup.cfg requirements.txt Pipfile; do
@@ -262,8 +277,11 @@ if [ -n "${SBCLAUDE_VENV:-}" ] && [ "${SBCLAUDE_SETUP_VENV:-1}" = "1" ]; then
             ' _ "$SBCLAUDE_VENV" "$venv_marker" ||
             echo "sbclaude: could not prepare $SBCLAUDE_VENV; continuing without it." >&2
     fi
-    # On PATH regardless, so that python and pip resolve to the box's virtualenv rather than the
-    # image's /opt/venv even when provisioning was skipped or failed.
+fi
+# On PATH whenever there is a virtualenv path at all, so that python and pip resolve to the box's
+# virtualenv rather than the image's /opt/venv even when provisioning was skipped or failed, or
+# when the environment was left behind by an earlier box on a mounted volume.
+if [ -n "${SBCLAUDE_VENV:-}" ]; then
     export PATH="$SBCLAUDE_VENV/bin:$PATH"
 fi
 

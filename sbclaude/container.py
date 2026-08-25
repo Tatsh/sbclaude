@@ -30,8 +30,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 __all__ = ('IMAGE_BASE', 'LABEL', 'RunSpec', 'build_images', 'config_dir', 'default_name',
-           'delete_images', 'ensure_image', 'image_exists', 'image_up_to_date', 'list_managed',
-           'project_containers', 'run', 'shell', 'stop', 'unique_name', 'uv_project_environment')
+           'delete_images', 'ensure_image', 'image_exists', 'image_up_to_date', 'is_python_project',
+           'list_managed', 'project_containers', 'run', 'shell', 'stop',
+           'transient_uv_project_environment', 'unique_name', 'uv_project_environment',
+           'uv_project_environment_in')
 
 LABEL = 'sbclaude.managed'
 """Docker label marking a container as sbclaude-managed."""
@@ -79,6 +81,18 @@ HOST_VENV_DIR_NAME = '.venv'
 """Name of the host's virtualenv directory, which the box mounts read-only."""
 GIT_EXCLUDE_ENTRY = f'/{VENV_DIR_NAME}/'
 """Entry written to ``.gitignore`` so the box's virtualenv never shows up in git status."""
+PYTHON_MARKERS = ('Pipfile', 'pyproject.toml', 'requirements.txt', 'setup.cfg', 'setup.py')
+"""
+Files whose presence marks a project as Python, matching what the entrypoint provisions on.
+
+:meta hide-value:
+"""
+_UNSEARCHED_DIRS = frozenset({'__pycache__', 'node_modules', 'target', 'vendor'})
+"""
+Directories skipped when looking for a ``.py`` file, along with every dotted one.
+
+:meta hide-value:
+"""
 _NAME_SANITIZE = re.compile(r'[^a-zA-Z0-9_.-]')
 """Pattern matching characters not allowed in a derived container or path name."""
 
@@ -182,6 +196,53 @@ def uv_project_environment(project: Path) -> str:
     return str(project / VENV_DIR_NAME)
 
 
+def uv_project_environment_in(directory: str, project: Path) -> str:
+    """
+    Derive the box's virtualenv path inside a directory that is not the project.
+
+    The directory holds one subdirectory per project, named after it and suffixed with a digest
+    of its absolute path. The digest is what keeps two projects of the same name (``~/dev/foo``
+    and ``~/work/foo``) from sharing one environment when a single volume is mounted for all of
+    them, which would leave each ``uv sync`` replacing the other's packages.
+
+    Parameters
+    ----------
+    directory : str
+        An absolute directory inside the container, typically a mounted volume.
+    project : Path
+        The project directory.
+
+    Returns
+    -------
+    str
+        The absolute path of the box's virtualenv.
+    """
+    digest = hashlib.blake2b(str(project).encode(), digest_size=3).hexdigest()
+    return f'{directory.rstrip("/")}/sbclaude-venv-{_NAME_SANITIZE.sub("-", project.name)}-{digest}'
+
+
+def transient_uv_project_environment(project: Path) -> str:
+    """
+    Derive a container-local virtualenv path for a box that must not write to the project.
+
+    Inside the container rather than beside the project, so ``--no-modify`` holds: nothing is
+    created in the project directory. The container is run with ``--rm``, so this virtualenv does
+    not survive the box and is rebuilt on the next start; ``venv_dir`` pointed at a mounted volume
+    is what buys persistence back.
+
+    Parameters
+    ----------
+    project : Path
+        The project directory.
+
+    Returns
+    -------
+    str
+        The absolute path of the box's virtualenv, inside the container.
+    """
+    return uv_project_environment_in('/tmp', project)  # noqa: S108
+
+
 def _host_venv_args(project: Path) -> list[str]:
     # Re-mount the host's virtualenv read-only over itself, so that nothing in the box can write
     # to it. The bind mount of the project is read-write (the agent has to be able to edit the
@@ -192,6 +253,34 @@ def _host_venv_args(project: Path) -> list[str]:
     if not venv.is_dir():
         return []
     return [*_v(venv, ro=True)]
+
+
+def is_python_project(project: Path) -> bool:
+    """
+    Report whether a project is a Python one, and so needs a virtualenv at all.
+
+    True when one of ``PYTHON_MARKERS`` sits at the top level, or when any ``.py`` file
+    exists anywhere below it. The scan stops at the first hit and skips dotted directories along
+    with a few large build and dependency trees, none of which say anything about the project's
+    own language.
+
+    Parameters
+    ----------
+    project : Path
+        The project directory.
+
+    Returns
+    -------
+    bool
+        ``True`` when the project looks like Python.
+    """
+    if any((project / marker).is_file() for marker in PYTHON_MARKERS):
+        return True
+    for _, dirs, files in os.walk(project):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in _UNSEARCHED_DIRS]
+        if any(f.endswith('.py') for f in files):
+            return True
+    return False
 
 
 def exclude_venv_from_git(project: Path) -> bool:
