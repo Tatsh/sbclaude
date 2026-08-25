@@ -18,6 +18,7 @@ binutils
 bsdmainutils
 bsky
 buildargs
+capsys
 cdrommsf
 chowning
 cmdline
@@ -25,7 +26,6 @@ codesign
 colorlog
 commitizen
 conftest
-cooldown
 coveragerc
 coverallsapp
 crashpad
@@ -51,6 +51,7 @@ domcontentloaded
 dunder
 eeyore
 elif
+endswith
 enoent
 esac
 esbenp
@@ -91,13 +92,13 @@ htmlcov
 idevice
 ihdr
 incl
-intersphinx
 ioctl
 isort
 itertools
 jadx
 jbaaaaaaaaaaar
 jinja
+journalctl
 jsonnet
 jsonnetfmt
 jsonschema
@@ -160,6 +161,7 @@ nodistro
 nonexistent
 noninteractive
 nopasswd
+noqa
 norecursedirs
 nosystem
 notarytool
@@ -169,6 +171,7 @@ nvidiactl
 nvml
 onefile
 oneline
+openlog
 passthrough
 passwordless
 pathlib

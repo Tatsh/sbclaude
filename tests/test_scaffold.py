@@ -9,8 +9,9 @@ import json
 import os
 import stat
 
-from sbclaude.scaffold import DEFAULT_SCENE, SCENE_PLACEHOLDER, scaffold
 import pytest
+
+from sbclaude.scaffold import DEFAULT_SCENE, SCENE_PLACEHOLDER, scaffold
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
