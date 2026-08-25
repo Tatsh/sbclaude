@@ -28,6 +28,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   restores it on `sudo` alone and only for a `--sudo` box.
 - `sbclaude shell --root` opens the shell as root, which is what `shell` used to do
   unconditionally.
+- A box that fails to start is retried, three attempts in all, after which sbclaude says so. The
+  docker exit codes that mean the container never ran (125–127) and a session that dies within
+  seconds both count as a failure to start; a session that ran and then ended never does. The
+  command is rebuilt for each attempt, so a GPU woken by the previous attempt's probe is picked up
+  by the next. Docker's own message plus the `docker run` command behind it goes to syslog
+  (`journalctl -t sbclaude`), which survives a terminal that does not. `-d/--debug` logs the same
+  command before launching.
+- `--gpu` no longer starts a box that cannot run. `--gpus all` is passed only once `nvidia-smi -L`
+  lists a device, retried a few times since that call is also what resumes a card parked at
+  D3cold; otherwise the box starts on the DRM render nodes alone with a warning. Asking the daemon
+  for an unresolvable `nvidia.com/gpu=all` only warns in its log, then kills the container half a
+  second later.
+- `--no-fullscreen` (config key `fullscreen`) stops forcing claude's fullscreen TUI. The TUI draws
+  on the terminal's alternate screen, which is discarded on exit, so a session that failed on start
+  took its own error message with it.
 - `--venv-dir DIR` (config key `venv_dir`) holds the box's virtualenv in `DIR` rather than beside
   the project, so pairing it with a volume in `docker_args` keeps the environment across boxes
   without writing into the project. One subdirectory per project, suffixed with a digest of its

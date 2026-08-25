@@ -70,6 +70,18 @@ def test_load_config_manage_uv_env_false(tmp_path: Path) -> None:
     assert load_config(path).manage_uv_env is False
 
 
+def test_load_config_fullscreen_default_true(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    assert load_config(path).fullscreen is True
+
+
+def test_load_config_fullscreen_false(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nfullscreen = false\n')
+    assert load_config(path).fullscreen is False
+
+
 def test_load_config_modify_default_true(tmp_path: Path) -> None:
     path = tmp_path / 'config.toml'
     path.write_text('[tool.sbclaude]\nnetwork = "host"\n')

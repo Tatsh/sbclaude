@@ -13,25 +13,32 @@ from importlib import resources
 from pathlib import Path
 from shutil import which
 from typing import TYPE_CHECKING
+import codecs
 import getpass
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
+import shlex
 import subprocess as sp
 import sys
+import syslog
 import tempfile
+import time
 
 import docker
 import docker.errors
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Sequence
+
+log = logging.getLogger(__name__)
 
 __all__ = ('IMAGE_BASE', 'LABEL', 'RunSpec', 'build_images', 'config_dir', 'default_name',
-           'delete_images', 'ensure_image', 'image_exists', 'image_up_to_date', 'is_python_project',
-           'list_managed', 'project_containers', 'run', 'shell', 'stop',
+           'delete_images', 'ensure_image', 'gpu_ready', 'image_exists', 'image_up_to_date',
+           'is_python_project', 'list_managed', 'project_containers', 'run', 'shell', 'stop',
            'transient_uv_project_environment', 'unique_name', 'uv_project_environment',
            'uv_project_environment_in')
 
@@ -73,6 +80,30 @@ USB_DEVICE_DIR = Path('/dev/bus/usb')
 """Host USB device tree, exposed for adb over USB."""
 NVIDIA_DEVICES = (Path('/dev/nvidia0'), Path('/dev/nvidiactl'))
 """Host NVIDIA device nodes whose groups the box joins for GPU access."""
+GPU_PROBE = ('nvidia-smi', '-L')
+"""
+Command that both wakes an NVIDIA GPU and reports whether it can be used.
+
+:meta hide-value:
+"""
+_GPU_PROBE_ATTEMPTS = 3
+"""
+How many times the GPU is probed before the box is started without it.
+
+:meta hide-value:
+"""
+_GPU_PROBE_DELAY_SECONDS = 1.0
+"""
+Pause between GPU probes, giving a card resuming from D3cold time to answer.
+
+:meta hide-value:
+"""
+_GPU_PROBE_TIMEOUT_SECONDS = 5.0
+"""
+How long a single GPU probe may take; a wedged driver can hang one indefinitely.
+
+:meta hide-value:
+"""
 DRI_DEVICE_DIR = Path('/dev/dri')
 """Host DRM device directory; its render nodes are passed through for GPU rendering."""
 VENV_DIR_NAME = '.sbclaude-venv'
@@ -95,6 +126,46 @@ Directories skipped when looking for a ``.py`` file, along with every dotted one
 """
 _NAME_SANITIZE = re.compile(r'[^a-zA-Z0-9_.-]')
 """Pattern matching characters not allowed in a derived container or path name."""
+_START_FAILURE_REASONS = {
+    125: 'docker refused to start it',
+    126: 'the container command could not be executed',
+    127: 'the container command was not found'
+}
+"""
+Exit codes the docker CLI reserves for a container that never ran, and what each means.
+
+:meta hide-value:
+"""
+_QUICK_EXIT_SECONDS = 5.0
+"""
+Below this, a session is treated as having failed on start rather than having been ended.
+
+:meta hide-value:
+"""
+_SIGNAL_EXIT_BASE = 128
+"""
+Exit codes at or above this report death by signal, such as a session ended with Ctrl-C.
+
+:meta hide-value:
+"""
+_STDERR_TAIL_CHARS = 4096
+"""
+How much of docker's stderr is kept for the log; its diagnoses are a line or two.
+
+:meta hide-value:
+"""
+_LAUNCH_ATTEMPTS = 3
+"""
+How many times a box that never starts is launched before giving up.
+
+:meta hide-value:
+"""
+_LAUNCH_RETRY_SECONDS = 2.0
+"""
+Pause between launch attempts, leaving the daemon and a waking GPU time to settle.
+
+:meta hide-value:
+"""
 
 
 @dataclass
@@ -114,6 +185,8 @@ class RunSpec:
     """Debian archive mirror for an auto-triggered image build, or ``None`` for the default."""
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables injected into the box."""
+    fullscreen: bool = True
+    """Whether to force claude's fullscreen TUI in the patched settings."""
     harden: bool = True
     """Whether to apply the container hardening flags."""
     image: str | None = None
@@ -360,17 +433,20 @@ def claude_binary() -> Path:
     return Path(found).resolve()
 
 
-def _patched_settings(settings: Path) -> Path:
+def _patched_settings(settings: Path, *, fullscreen: bool = True) -> Path:
     """
-    Write a copy of ``settings.json`` patched for the no-prompt fullscreen box.
+    Write a copy of ``settings.json`` patched for the no-prompt box.
 
-    The bash sandbox is disabled, the dangerous-mode permission prompt is skipped, and
-    the TUI is forced to fullscreen.
+    The bash sandbox is disabled, the dangerous-mode permission prompt is skipped, and the TUI is
+    forced to fullscreen unless ``fullscreen`` is false. Leaving it as the host has it keeps a
+    claude that dies on start from taking its own error message down with the alternate screen.
 
     Parameters
     ----------
     settings : Path
         The host ``~/.claude/settings.json``.
+    fullscreen : bool
+        Whether to force the fullscreen TUI.
 
     Returns
     -------
@@ -381,9 +457,10 @@ def _patched_settings(settings: Path) -> Path:
         'sandbox': {
             'enabled': False
         },
-        'skipDangerousModePermissionPrompt': True,
+        'skipDangerousModePermissionPrompt': True
+    } | ({
         'tui': 'fullscreen'
-    }
+    } if fullscreen else {})
     fd, name = tempfile.mkstemp(prefix='sbclaude-settings.', suffix='.json')
     with os.fdopen(fd, 'w') as handle:
         json.dump(data, handle)
@@ -489,7 +566,7 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     if settings.is_file():
         # Mounted read-write (not :ro) so claude can save settings in-session; writes land in this
         # throwaway temp file, leaving the host settings.json untouched.
-        cleanup = _patched_settings(settings)
+        cleanup = _patched_settings(settings, fullscreen=spec.fullscreen)
         argv += _v(cleanup, cfg_dir / 'settings.json')
     argv += _gitconfig_args(home)
     argv += _host_venv_args(spec.project)
@@ -527,6 +604,44 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     return argv, cleanup
 
 
+def gpu_ready() -> bool:
+    """
+    Wake an NVIDIA GPU and report whether it can be handed to a container.
+
+    ``nvidia-smi`` is the probe and the wake-up in one: opening the control device resumes a card
+    the kernel has parked at runtime, and loads the driver on a host where it was never inserted.
+    A card mid-resume can fail the first call and answer the next, so it is asked more than once.
+
+    Where ``nvidia-smi`` is not installed, there is nothing to ask, and the presence of the driver's
+    device nodes stands in for it, which is as much as can be known without the tool.
+
+    Returns
+    -------
+    bool
+        ``True`` when a GPU is listed, or when its device nodes exist and there is no probe.
+    """
+    if not which(GPU_PROBE[0]):
+        return any(dev.exists() for dev in NVIDIA_DEVICES)
+    for attempt in range(1, _GPU_PROBE_ATTEMPTS + 1):
+        if attempt > 1:
+            time.sleep(_GPU_PROBE_DELAY_SECONDS)
+        try:
+            listed = sp.run(GPU_PROBE,
+                            capture_output=True,
+                            check=True,
+                            text=True,
+                            timeout=_GPU_PROBE_TIMEOUT_SECONDS).stdout
+        except (OSError, sp.SubprocessError) as e:
+            log.debug('GPU probe %d of %d failed: %s', attempt, _GPU_PROBE_ATTEMPTS, e)
+            continue
+        # Every listed device carries a UUID; an empty list is the "No devices were found" reply.
+        if 'UUID' in listed:
+            log.debug('GPU probe %d of %d found a device.', attempt, _GPU_PROBE_ATTEMPTS)
+            return True
+        log.debug('GPU probe %d of %d listed no device.', attempt, _GPU_PROBE_ATTEMPTS)
+    return False
+
+
 def _gpu_args(*, use_x11: bool = False) -> list[str]:
     # `graphics` is what makes the NVIDIA Container Toolkit inject the GL/EGL/Vulkan userspace
     # (libGL, libEGL, libnvidia-glcore, the Vulkan ICD). Without it only CUDA is available and
@@ -535,10 +650,24 @@ def _gpu_args(*, use_x11: bool = False) -> list[str]:
     caps = 'compute,utility,graphics'
     if use_x11:
         caps += ',display'
-    args = ['--gpus', 'all', '-e', f'NVIDIA_DRIVER_CAPABILITIES={caps}']
-    for dev in NVIDIA_DEVICES:
-        if dev.exists():
-            args += ['--group-add', str(dev.stat().st_gid)]
+    args: list[str] = []
+    # Only ask for the NVIDIA GPUs once one has answered. The daemon resolves the request against
+    # the CDI registry, and `nvidia.com/gpu=all` with no usable card (parked at D3cold, an eGPU
+    # that is not attached, a module never inserted) is unresolvable: the daemon logs a warning,
+    # starts the container anyway, and it dies within the second. Dropping the request leaves a
+    # working box on the DRM nodes below instead of one that cannot start.
+    if gpu_ready():
+        args += ['--gpus', 'all', '-e', f'NVIDIA_DRIVER_CAPABILITIES={caps}']
+        args += [
+            arg for dev in NVIDIA_DEVICES if dev.exists()
+            for arg in ('--group-add', str(dev.stat().st_gid))
+        ]
+    else:
+        message = (f'--gpu: no NVIDIA GPU answered after {_GPU_PROBE_ATTEMPTS} attempts, so the '
+                   'box starts without --gpus all. Asking Docker for one anyway starts a '
+                   'container that dies immediately.')
+        sys.stderr.write(f'sbclaude: {message}\n')
+        _to_syslog(message)
     # DRM render nodes. Needed by Mesa on AMD/Intel, and used by Vulkan/VA-API even on NVIDIA.
     # Passed as devices (not a bind mount) so the device cgroup actually allows access.
     for node in sorted(DRI_DEVICE_DIR.glob('renderD*')) if DRI_DEVICE_DIR.is_dir() else []:
@@ -757,9 +886,80 @@ def _x11_args(uid: int, user: str) -> list[str]:
     return args
 
 
+def _run_relaying_stderr(argv: Sequence[str]) -> tuple[int, str]:
+    # docker's own diagnosis -- the daemon's refusal, the unresolvable device, and the mount that
+    # does not exist -- is on stderr, and that is the one thing worth keeping. It is passed straight
+    # through as it arrives, so the terminal behaves as before, while a bounded tail is kept back
+    # for the log.
+    #
+    # stdin and stdout stay attached to the terminal untouched: `docker run -t` and the TUI both
+    # need a real terminal on them, and with a TTY allocated the container's own output comes back
+    # on stdout anyway, so nothing of the session is intercepted here.
+    decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+    tail = ''
+    with sp.Popen(argv, stderr=sp.PIPE, bufsize=0) as proc:
+        # stderr=PIPE always gives a stream; the check is for the type checker alone.
+        while proc.stderr and (chunk := proc.stderr.read(_STDERR_TAIL_CHARS)):
+            text = decoder.decode(chunk)
+            sys.stderr.write(text)
+            sys.stderr.flush()
+            tail = (tail + text)[-_STDERR_TAIL_CHARS:]
+    return proc.returncode, tail.strip()
+
+
+def _to_syslog(message: str) -> None:
+    # The terminal cannot be relied on to carry a start failure: the fullscreen TUI erases its own
+    # screen on the way out, and a box that dies before the prompt returns can leave nothing behind
+    # at all. The system log survives both, so the same message goes there and can be read
+    # afterwards with `journalctl -t sbclaude`.
+    # One entry per line: a single long entry is what journalctl truncates at the terminal width,
+    # and the reason has to survive that.
+    try:
+        syslog.openlog('sbclaude', syslog.LOG_PID, syslog.LOG_USER)
+        for line in message.splitlines():
+            syslog.syslog(syslog.LOG_ERR, line)
+        syslog.closelog()
+    except OSError as e:
+        sys.stderr.write(f'sbclaude: could not write to syslog: {e}\n')
+
+
+def _failed_to_start(code: int, seconds: float) -> bool:
+    # Two shapes of "it never got going". The docker CLI reserves 125-127 for a container that
+    # never ran, and a box that exits within seconds died before a session could begin (an
+    # unresolvable GPU, a mount that is not there, an entrypoint that aborted). Signal deaths
+    # (128+) are neither: a session ended with Ctrl-C worked exactly as asked.
+    if not code:
+        return False
+    return code in _START_FAILURE_REASONS or (code < _SIGNAL_EXIT_BASE
+                                              and seconds < _QUICK_EXIT_SECONDS)
+
+
+def _report_failure(code: int, seconds: float, argv: Sequence[str], stderr_tail: str, *,
+                    attempt: int, fullscreen: bool) -> None:
+    # docker's own message goes to the terminal but the command behind it does not, and that is
+    # usually where the answer is; anything claude printed while dying is already gone with the
+    # alternate screen. Both are put in the log, where they outlive the terminal.
+    reason = _START_FAILURE_REASONS.get(code, f'it exited with {code} after {seconds:.1f}s')
+    detail = f'{stderr_tail}\n' if stderr_tail else ''
+    last = attempt >= _LAUNCH_ATTEMPTS
+    _to_syslog(f'Attempt {attempt} of {_LAUNCH_ATTEMPTS}: the box did not start ({reason}, exit '
+               f'{code}).\n{detail}Command: {shlex.join(argv)}')
+    tail = (' Giving up.' if last else ' Retrying.')
+    hint = (' Re-run with --no-fullscreen to see what it printed, erased here by the fullscreen '
+            'TUI.' if last and fullscreen and code not in _START_FAILURE_REASONS else '')
+    sys.stderr.write(f'sbclaude: the box did not start ({reason}, exit {code}), attempt {attempt} '
+                     f'of {_LAUNCH_ATTEMPTS}.{tail}{hint} Details in the system log: '
+                     'journalctl -t sbclaude\n')
+
+
 def run(spec: RunSpec) -> int:
     """
-    Launch an interactive claude session.
+    Launch an interactive claude session, retrying a box that never starts.
+
+    A box that dies before a session begins is launched again, three attempts in all. The command
+    is rebuilt for each attempt rather than reused, so a GPU that the previous attempt's probe woke
+    is picked up by the next one. A session that ran and then ended, whatever its exit code, is
+    never retried.
 
     Parameters
     ----------
@@ -769,7 +969,7 @@ def run(spec: RunSpec) -> int:
     Returns
     -------
     int
-        The container's exit code.
+        The container's exit code, from the last attempt made.
     """
     image = spec.image or IMAGE_BASE
     if image == IMAGE_BASE:
@@ -777,12 +977,27 @@ def run(spec: RunSpec) -> int:
             image,
             log=lambda line: print(line, file=sys.stderr),  # noqa: T201
             debian_mirror=spec.debian_mirror)
-    argv, cleanup = build_run_argv(spec)
-    try:
-        return sp.run(argv, check=False).returncode
-    finally:
-        if cleanup is not None:
-            cleanup.unlink(missing_ok=True)
+    code = 0
+    for attempt in range(1, _LAUNCH_ATTEMPTS + 1):
+        if attempt > 1:
+            time.sleep(_LAUNCH_RETRY_SECONDS)
+        argv, cleanup = build_run_argv(spec)
+        log.debug('Running: %s', shlex.join(argv))
+        started = time.monotonic()
+        try:
+            code, stderr_tail = _run_relaying_stderr(argv)
+        finally:
+            if cleanup is not None:
+                cleanup.unlink(missing_ok=True)
+        if not _failed_to_start(code, seconds := time.monotonic() - started):
+            return code
+        _report_failure(code,
+                        seconds,
+                        argv,
+                        stderr_tail,
+                        attempt=attempt,
+                        fullscreen=spec.fullscreen)
+    return code
 
 
 def _box_env(name: str) -> dict[str, str]:

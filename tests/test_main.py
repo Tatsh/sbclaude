@@ -320,6 +320,17 @@ def test_run_without_python_gets_no_venv(args: list[str], runner: CliRunner, tmp
     exclude.assert_not_called()
 
 
+@pytest.mark.parametrize(('args', 'cfg_fullscreen', 'expected'),
+                         [(['run'], True, True), (['run', '--no-fullscreen'], True, False),
+                          (['run'], False, False)])
+def test_run_fullscreen_resolution(args: list[str], runner: CliRunner, mocker: MockerFixture, *,
+                                   cfg_fullscreen: bool, expected: bool) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(fullscreen=cfg_fullscreen))
+    runner.invoke(main, args)
+    assert run.call_args[0][0].fullscreen is expected
+
+
 def test_run_no_modify_skips_venv_provisioning(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())

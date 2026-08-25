@@ -15,7 +15,15 @@ import pytest
 from sbclaude import container
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from unittest.mock import MagicMock
+
     from pytest_mock import MockerFixture
+
+
+def _box_launches(popen: MagicMock) -> int:
+    # The patched Popen also sees the git calls build_run_argv makes, which are passed through.
+    return sum(list(call[0][0][:2]) == ['docker', 'run'] for call in popen.call_args_list)
 
 
 def test_default_name() -> None:
@@ -236,16 +244,145 @@ def test_build_run_argv_gitconfig_fallback(exc: Exception, mocker: MockerFixture
     assert f'{gitconfig}:{gitconfig}:ro' in argv
 
 
-def test_run_invokes_subprocess(mocker: MockerFixture, tmp_path: Path) -> None:
+def test_build_run_argv_no_fullscreen_leaves_the_tui_alone(mocker: MockerFixture,
+                                                           tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    claude_dir = tmp_path / '.claude'
+    claude_dir.mkdir()
+    (claude_dir / 'settings.json').write_text('{"tui": "compact"}')
+    project = tmp_path / 'p'
+    project.mkdir()
+    _, cleanup = container.build_run_argv(
+        container.RunSpec(project=project, name='n', fullscreen=False))
+    assert cleanup is not None
+    data = json.loads(cleanup.read_text())
+    assert data['tui'] == 'compact'
+    assert data['sandbox'] == {'enabled': False}
+    cleanup.unlink()
+
+
+@pytest.mark.parametrize('code', [125, 126, 127])
+def test_run_reports_a_container_that_never_started(code: int, capsys: pytest.CaptureFixture[str],
+                                                    docker_run: Callable[..., MagicMock],
+                                                    mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
-    completed = mocker.patch('sbclaude.container.sp.run')
-    completed.return_value.returncode = 7
+    mocker.patch('sbclaude.container.time.sleep')
+    popen = docker_run(code, b'docker: Error response from daemon: unresolvable CDI devices\n')
+    to_syslog = mocker.patch('sbclaude.container.syslog.syslog')
+    project = tmp_path / 'p'
+    project.mkdir()
+    assert container.run(container.RunSpec(project=project, name='n')) == code
+    err = capsys.readouterr().err
+    assert 'unresolvable CDI devices' in err
+    assert 'did not start' in err
+    assert 'attempt 3 of 3' in err
+    assert 'Giving up.' in err
+    assert _box_launches(popen) == 3
+    logged = '\n'.join(call[0][1] for call in to_syslog.call_args_list)
+    assert 'unresolvable CDI devices' in logged
+    assert 'docker run' in logged
+
+
+def test_run_stops_retrying_once_a_box_starts(capsys: pytest.CaptureFixture[str],
+                                              docker_run: Callable[..., MagicMock],
+                                              mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.syslog.syslog')
+    popen = docker_run([125, 0])
+    project = tmp_path / 'p'
+    project.mkdir()
+    assert container.run(container.RunSpec(project=project, name='n')) == 0
+    assert _box_launches(popen) == 2
+    assert 'Giving up.' not in capsys.readouterr().err
+
+
+def test_run_points_at_no_fullscreen_when_a_session_dies_at_once(capsys: pytest.CaptureFixture[str],
+                                                                 docker_run: Callable[...,
+                                                                                      MagicMock],
+                                                                 mocker: MockerFixture,
+                                                                 tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.time.sleep')
+    docker_run(1)
+    to_syslog = mocker.patch('sbclaude.container.syslog.syslog')
+    project = tmp_path / 'p'
+    project.mkdir()
+    container.run(container.RunSpec(project=project, name='n'))
+    assert '--no-fullscreen' in capsys.readouterr().err
+    assert any('docker run' in call[0][1] for call in to_syslog.call_args_list)
+
+
+def test_run_does_not_blame_the_tui_without_it(capsys: pytest.CaptureFixture[str],
+                                               docker_run: Callable[..., MagicMock],
+                                               mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.time.sleep')
+    docker_run(1)
+    mocker.patch('sbclaude.container.syslog.syslog')
+    project = tmp_path / 'p'
+    project.mkdir()
+    container.run(container.RunSpec(project=project, name='n', fullscreen=False))
+    err = capsys.readouterr().err
+    assert 'exited with 1' in err
+    assert '--no-fullscreen' not in err
+
+
+def test_run_survives_a_syslog_that_cannot_be_written(capsys: pytest.CaptureFixture[str],
+                                                      docker_run: Callable[..., MagicMock],
+                                                      mocker: MockerFixture,
+                                                      tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.time.sleep')
+    docker_run(125)
+    mocker.patch('sbclaude.container.syslog.openlog', side_effect=OSError('no /dev/log'))
+    project = tmp_path / 'p'
+    project.mkdir()
+    assert container.run(container.RunSpec(project=project, name='n')) == 125
+    err = capsys.readouterr().err
+    assert 'could not write to syslog' in err
+    assert 'did not start' in err
+
+
+@pytest.mark.parametrize(('code', 'seconds'), [(0, 0.0), (130, 0.0), (1, 30.0)])
+def test_run_stays_quiet_when_there_is_nothing_to_explain(code: int, seconds: float,
+                                                          capsys: pytest.CaptureFixture[str],
+                                                          docker_run: Callable[..., MagicMock],
+                                                          mocker: MockerFixture,
+                                                          tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    docker_run(code)
+    mocker.patch('sbclaude.container.time.monotonic', side_effect=[0.0, seconds])
+    project = tmp_path / 'p'
+    project.mkdir()
+    container.run(container.RunSpec(project=project, name='n'))
+    assert not capsys.readouterr().err
+
+
+def test_run_invokes_subprocess(docker_run: Callable[..., MagicMock], mocker: MockerFixture,
+                                tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.syslog.syslog')
+    popen = docker_run(7)
     project = tmp_path / 'p'
     project.mkdir()
     assert container.run(container.RunSpec(project=project, name='n')) == 7
-    assert completed.called
+    assert popen.call_args[0][0][:2] == ['docker', 'run']
 
 
 def test_shell_invokes_docker_as_mapped_user(mocker: MockerFixture) -> None:
@@ -508,6 +645,7 @@ def test_build_run_argv_usb_absent(mocker: MockerFixture, tmp_path: Path) -> Non
 def test_build_run_argv_gpu(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.gpu_ready', return_value=True)
     dev = tmp_path / 'nvidia0'
     dev.write_text('')
     mocker.patch('sbclaude.container.NVIDIA_DEVICES', (dev, tmp_path / 'absent-nvidiactl'))
@@ -524,6 +662,7 @@ def test_build_run_argv_gpu(mocker: MockerFixture, tmp_path: Path) -> None:
 def test_build_run_argv_gpu_x11_adds_display_cap(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.gpu_ready', return_value=True)
     mocker.patch('sbclaude.container.NVIDIA_DEVICES', ())
     mocker.patch('sbclaude.container.DRI_DEVICE_DIR', tmp_path / 'absent-dri')
     project = tmp_path / 'p'
@@ -533,9 +672,73 @@ def test_build_run_argv_gpu_x11_adds_display_cap(mocker: MockerFixture, tmp_path
     assert 'NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display' in argv
 
 
+def test_build_run_argv_gpu_when_none_answers(capsys: pytest.CaptureFixture[str],
+                                              mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.gpu_ready', return_value=False)
+    mocker.patch('sbclaude.container.DRI_DEVICE_DIR', tmp_path / 'absent-dri')
+    to_syslog = mocker.patch('sbclaude.container.syslog.syslog')
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpu=True))
+    assert '--gpus' not in argv
+    assert not any(arg.startswith('NVIDIA_DRIVER_CAPABILITIES') for arg in argv)
+    assert 'no NVIDIA GPU answered' in capsys.readouterr().err
+    assert to_syslog.called
+
+
+def test_gpu_ready_when_a_device_is_listed(mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/nvidia-smi')
+    run = mocker.patch('sbclaude.container.sp.run')
+    run.return_value.stdout = 'GPU 0: NVIDIA GeForce RTX 4090 (UUID: GPU-abc)\n'
+    assert container.gpu_ready() is True
+    assert run.call_count == 1
+
+
+def test_gpu_ready_retries_a_card_still_waking(mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/nvidia-smi')
+    mocker.patch('sbclaude.container.time.sleep')
+    run = mocker.patch('sbclaude.container.sp.run',
+                       side_effect=[
+                           sp.CalledProcessError(9, 'nvidia-smi'),
+                           mocker.MagicMock(stdout='No devices were found\n'),
+                           mocker.MagicMock(stdout='GPU 0: NVIDIA A2000 (UUID: GPU-abc)\n')
+                       ])
+    assert container.gpu_ready() is True
+    assert run.call_count == 3
+
+
+@pytest.mark.parametrize(
+    'outcome',
+    [sp.CalledProcessError(9, 'nvidia-smi'),
+     sp.TimeoutExpired('nvidia-smi', 5.0),
+     OSError('gone')])
+def test_gpu_ready_gives_up(outcome: Exception, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/nvidia-smi')
+    sleep = mocker.patch('sbclaude.container.time.sleep')
+    run = mocker.patch('sbclaude.container.sp.run', side_effect=outcome)
+    assert container.gpu_ready() is False
+    assert run.call_count == 3
+    assert sleep.call_count == 2
+
+
+@pytest.mark.parametrize('present', [True, False])
+def test_gpu_ready_without_the_probe_falls_back_to_device_nodes(mocker: MockerFixture,
+                                                                tmp_path: Path, *,
+                                                                present: bool) -> None:
+    mocker.patch('sbclaude.container.which', return_value=None)
+    dev = tmp_path / 'nvidia0'
+    if present:
+        dev.write_text('')
+    mocker.patch('sbclaude.container.NVIDIA_DEVICES', (dev,))
+    assert container.gpu_ready() is present
+
+
 def test_build_run_argv_gpu_passes_dri_render_nodes(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.gpu_ready', return_value=True)
     mocker.patch('sbclaude.container.NVIDIA_DEVICES', ())
     dri = tmp_path / 'dri'
     dri.mkdir()
@@ -876,7 +1079,8 @@ def test_build_run_argv_wayland_missing_socket(mocker: MockerFixture, tmp_path: 
     assert not any(a.startswith('WAYLAND_DISPLAY=') for a in argv)
 
 
-def test_run_cleans_up_patched_settings(mocker: MockerFixture, tmp_path: Path) -> None:
+def test_run_cleans_up_patched_settings(docker_run: Callable[..., MagicMock], mocker: MockerFixture,
+                                        tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
@@ -885,8 +1089,7 @@ def test_run_cleans_up_patched_settings(mocker: MockerFixture, tmp_path: Path) -
     (claude_dir / 'settings.json').write_text('{"sandbox": {"enabled": true}}')
     project = tmp_path / 'p'
     project.mkdir()
-    completed = mocker.patch('sbclaude.container.sp.run')
-    completed.return_value.returncode = 0
+    docker_run()
     tmpdir = Path(tempfile.gettempdir())
     before = set(tmpdir.glob('sbclaude-settings.*'))
     assert container.run(container.RunSpec(project=project, name='n')) == 0
@@ -1229,17 +1432,17 @@ def test_build_run_argv_x11_home_cookie(mocker: MockerFixture, tmp_path: Path) -
     assert f'XAUTHORITY={cookie}' in argv
 
 
-def test_run_custom_image_skips_ensure(mocker: MockerFixture, tmp_path: Path) -> None:
+def test_run_custom_image_skips_ensure(docker_run: Callable[..., MagicMock], mocker: MockerFixture,
+                                       tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     ensure = mocker.patch('sbclaude.container.ensure_image')
-    completed = mocker.patch('sbclaude.container.sp.run')
-    completed.return_value.returncode = 0
+    popen = docker_run()
     project = tmp_path / 'p'
     project.mkdir()
     assert container.run(container.RunSpec(project=project, name='n', image='custom:latest')) == 0
     assert not ensure.called
-    assert completed.call_args[0][0][-1] == 'custom:latest'
+    assert popen.call_args[0][0][-1] == 'custom:latest'
 
 
 def test_stop_all(mocker: MockerFixture) -> None:

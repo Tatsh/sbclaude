@@ -251,6 +251,11 @@ Disable the container hardening flags (cap\-drop, no\-new\-privileges, ...).
 .UNINDENT
 .INDENT 0.0
 .TP
+.B \-\-no\-fullscreen
+Do not force claude\(aqs fullscreen TUI. Use this when a session dies on start with no visible reason: fullscreen output is erased when it exits.
+.UNINDENT
+.INDENT 0.0
+.TP
 .B \-\-no\-modify
 Stop sbclaude writing anything into the project directory: no .gitignore entry, no virtualenv beside it, and no session\-recover install. Claude itself can still edit the project.
 .UNINDENT

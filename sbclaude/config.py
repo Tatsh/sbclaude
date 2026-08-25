@@ -63,6 +63,13 @@ class Config:
     """Extra arguments passed to ``docker run``."""
     env: dict[str, str] = field(default_factory=dict)
     """Fixed environment variables injected into the box."""
+    fullscreen: bool = True
+    """
+    Whether to force claude's fullscreen TUI in the box.
+
+    Turning it off keeps a claude that fails on start from erasing its own error message with the
+    terminal's alternate screen.
+    """
     ghidra: bool = False
     """Whether to mount the host Ghidra installation read-only."""
     gpg: bool = False
@@ -170,6 +177,7 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   debian_mirror=(str(data['debian_mirror']) if data.get('debian_mirror') else None),
                   docker_args=_str_list(data.get('docker_args')),
                   env=_str_dict(data.get('env')),
+                  fullscreen=bool(data.get('fullscreen', True)),
                   ghidra=bool(data.get('ghidra', False)),
                   gpg=bool(data.get('gpg', False)),
                   gpu=bool(data.get('gpu', False)),

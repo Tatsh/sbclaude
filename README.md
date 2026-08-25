@@ -150,9 +150,24 @@ more than one is running).
 | `--sudo`            | passwordless `sudo` in the box (drops `no-new-privileges`)                       |
 | `--venv-dir DIR`    | put the box's virtualenv in `DIR` (e.g. a volume) instead of beside the project  |
 | `--no-modify`       | stop sbclaude writing anything into the project directory                        |
+| `--no-fullscreen`   | do not force the fullscreen TUI, so a failing session's output survives          |
 | `--session-recover` | install `cc-session-recover` (auto-resume) into the project on start             |
 | `--net bridge`      | isolate the box's network (default is `host` — `localhost` = your host)          |
 | `-r/-w/-p/-n/-i`    | extra ro/rw mount, project, container name, image override                       |
+
+### When a box does not start
+
+A box that never gets going — docker exits 125–127, or the container dies within seconds — is
+launched again, up to three attempts, then sbclaude exits with the last code. A session that ran
+and then ended is never retried, whatever its exit code. Every attempt is logged to syslog with
+docker's own message and the `docker run` command behind it; read them with
+`journalctl -t sbclaude`. The terminal cannot be trusted here, because the fullscreen TUI erases
+its own screen on exit; `--no-fullscreen` keeps a failing session's output on the normal screen.
+
+`--gpu` probes for a GPU with `nvidia-smi -L` before asking Docker for one, retrying a few times
+because that probe is also what wakes a card the kernel has parked. If none answers, the box starts
+without `--gpus all` (the DRM render nodes are still passed): an unresolvable `nvidia.com/gpu=all`
+is a warning to the daemon but death to the container.
 
 ## Configuration
 
@@ -177,6 +192,7 @@ x11 = true       # forward X11 for GUI apps
 # recover = true                  # install cc-session-recover into every project (off by default)
 # modify = false                  # never write into the project directory (same as --no-modify)
 # venv_dir = "/venv-cache"        # hold the box's virtualenv here (pair with a docker_args volume)
+# fullscreen = false              # do not force the fullscreen TUI (keeps start-up errors visible)
 pass_env = ["AWS_REGION"]                          # forward host vars (AWS_PROFILE is default)
 ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"] # read-only mounts (globs + ~ ok)
 rw = []                                            # the project dir is always rw automatically

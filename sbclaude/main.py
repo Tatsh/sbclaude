@@ -98,6 +98,11 @@ def main(ctx: click.Context) -> None:
               'no_harden',
               is_flag=True,
               help='Disable the container hardening flags (cap-drop, no-new-privileges, ...).')
+@click.option('--no-fullscreen',
+              'no_fullscreen',
+              is_flag=True,
+              help="Do not force claude's fullscreen TUI. Use this when a session dies on start "
+              'with no visible reason: fullscreen output is erased when it exits.')
 @click.option('--no-modify',
               'no_modify',
               is_flag=True,
@@ -135,6 +140,7 @@ def run(
     use_ssh: bool,
     use_gpg: bool,
     use_sudo: bool,
+    no_fullscreen: bool,
     no_harden: bool,
     no_modify: bool,
     session_recover: bool,
@@ -188,6 +194,7 @@ def run(
                                               env_extra,
                                               modify=modify,
                                               venv_dir=venv_dir or cfg.venv_dir),
+                             fullscreen=cfg.fullscreen and not no_fullscreen,
                              harden=cfg.harden and not no_harden,
                              memory=memory,
                              cpus=cpus,
