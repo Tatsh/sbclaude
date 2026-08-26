@@ -35,6 +35,14 @@ and permission prompts **disabled**, against a configurable set of host bind mou
 container stores nothing of its own (`--rm`); everything lives on the host. You only ever
 invoke `sbclaude` — it manages its own image and containers via the Docker SDK.
 
+**The host must be Linux.** This is not a packaging gap that could be closed later: the host copy
+of `claude` is bind-mounted into a Linux container and executed there, so the host must supply an
+ELF build of it (a macOS host has a Mach-O one, which cannot run in the container); the identity
+mirroring reads `os.getuid()`; and every device and socket the run flags pass through
+(`/dev/nvidia*`, `/dev/dri`, `/dev/kvm`, `/dev/bus/usb`, `/tmp/.X11-unix`, `/run/user/<uid>`,
+`/var/run/usbmuxd`) is a Linux one. `sbclaude` refuses to start anywhere else rather than failing
+later with a Docker error.
+
 There is a single image, `sbclaude`, built on demand. It bundles everyday coding tools
 (Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv, jq), formatters and
 linters kept at their latest upstream release (clang-format, jsonnet, jsonnetfmt, shellcheck), Qt 6

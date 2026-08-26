@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
+import sys
 
 import docker.errors
 import pytest
@@ -16,6 +17,42 @@ from sbclaude.scaffold import ScaffoldResult
 if TYPE_CHECKING:
     from click.testing import CliRunner
     from pytest_mock import MockerFixture
+
+
+@pytest.mark.parametrize('platform', ['darwin', 'win32'])
+def test_main_refuses_a_non_linux_host(platform: str, runner: CliRunner, mocker: MockerFixture,
+                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, 'platform', platform)
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    result = runner.invoke(main, ['run'])
+    assert result.exit_code == 1
+    assert 'only runs on Linux' in result.output
+    assert not run.called
+
+
+@pytest.mark.parametrize(('option', 'expected'), [('--help', 'Usage:'), ('-h', 'Usage:'),
+                                                  ('--version', 'version')])
+def test_main_help_and_version_survive_a_non_linux_host(expected: str, option: str,
+                                                        runner: CliRunner,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, 'platform', 'darwin')
+    result = runner.invoke(main, [option])
+    assert result.exit_code == 0
+    assert expected in result.output
+    assert 'only runs on Linux' not in result.output
+
+
+@pytest.mark.parametrize(
+    'args', [[], ['run'], ['ls'], ['stop'], ['shell'], ['build'], ['delete-image'], ['config']])
+def test_main_refuses_every_subcommand_on_a_non_linux_host(args: list[str], runner: CliRunner,
+                                                           mocker: MockerFixture,
+                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, 'platform', 'darwin')
+    box = mocker.patch('sbclaude.main.container')
+    result = runner.invoke(main, args)
+    assert result.exit_code == 1
+    assert 'only runs on Linux' in result.output
+    assert not box.method_calls
 
 
 def test_run_default_invokes_container(runner: CliRunner, mocker: MockerFixture) -> None:

@@ -56,6 +56,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The host must now be Linux, which it has always had to be in practice. The host copy of `claude`
+  is bind-mounted into a Linux container and executed there, so an ELF build of it has to exist on
+  the host; the identity mirroring reads `os.getuid()`; and every device and socket the run flags
+  pass through is a Linux one. `sbclaude` now refuses to start on any other host rather than
+  failing later with a Docker error, and the packaging carries an
+  `Operating System :: POSIX :: Linux` classifier.
 - `sbclaude shell` now opens a login shell as the user the box mirrors, rather than as root. The
   working directory is unchanged (the project).
 - The box's virtualenv is only set up for a project that actually contains Python (a
@@ -88,6 +94,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   synthesised at start-up, so GL, EGL, and Vulkan clients find the real driver.
 - `~/.config` is no longer left root-owned when something is mounted beneath it, which had made
   Chrome abort at start-up.
+
+### Removed
+
+- The PyInstaller workflow, and with it the Windows and macOS release binaries. Its matrix held
+  nothing else, and neither platform can run a box: Windows has no `os.getuid` and no `syslog`
+  (which is what broke the build), and a macOS host's `claude` is a Mach-O binary that cannot
+  execute inside the Linux container it would be mounted into. Linux binaries are unaffected —
+  they come from the AppImage workflow.
 
 ## [0.0.1] - 2026-08-07
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import os
+import sys
 
 from bascom import setup_logging
 import click
@@ -17,6 +18,11 @@ __all__ = ('main',)
 
 DEFAULT_PASS_ENV = ('AWS_PROFILE',)
 """Host environment variables forwarded into the box by default when set."""
+UNSUPPORTED_PLATFORM = ('sbclaude only runs on Linux. The host copy of claude is bind-mounted into '
+                        'a Linux container and executed there, so the host must supply an ELF '
+                        'build of it. Every device and socket the run flags pass through is a '
+                        'Linux one too.')
+"""Refusal shown on a host where the box could never start."""
 
 
 @click.group(invoke_without_command=True, context_settings={'help_option_names': ('-h', '--help')})
@@ -26,8 +32,12 @@ def main(ctx: click.Context) -> None:
     """
     Run Claude Code in a throwaway Docker container (no sandbox, no prompts).
 
+    The host must be Linux.
+
     With no subcommand, behaves like `sbclaude run` using config defaults.
-    """
+    """  # noqa: DOC501
+    if sys.platform != 'linux':
+        raise click.ClickException(UNSUPPORTED_PLATFORM)
     if ctx.invoked_subcommand is None:
         ctx.invoke(run)
 
