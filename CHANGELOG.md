@@ -134,5 +134,6 @@ permission prompts disabled, against a configurable set of host bind mounts.
 See the README for the full feature set: RE toolchain, session recovery, MCP support, SSH and GPG
 passthrough, and per-project configuration.
 
-[unreleased]: https://github.com/Tatsh/sbclaude/compare/v0.0.1...HEAD
+[unreleased]: https://github.com/Tatsh/sbclaude/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Tatsh/sbclaude/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/Tatsh/sbclaude/releases/tag/v0.0.1
