@@ -69,6 +69,44 @@ Android SDK, jadx, and apktool).
 - The image **auto-builds on first use** and **rebuilds automatically** when the packaged
   Dockerfile/entrypoint change (tracked via a content-hash label).
 
+## Running from a non-Linux host
+
+This is unsupported, but the reason is narrow enough to work around, and there is one trap that is
+not obvious until it bites.
+
+The remaining constraint is not the operating system as such: `docker` resolves bind-mount sources
+on the **daemon's** filesystem, not the client's. `sbclaude` leans on that: `~/.claude` and the
+project are mounted at their own absolute paths, so a path you paste into a prompt resolves
+identically inside the box, and the host's `claude` binary is mounted at `/usr/local/bin/claude`.
+Every one of those sources has to exist on the daemon. On a Linux host the client and the daemon
+share one filesystem and this comes free; anywhere else it is something you have to arrange.
+
+**Windows** — use WSL2, which is a Linux environment rather than an emulation layer, so nothing
+needs arranging. Install `sbclaude` and `claude` inside the distribution, turn on Docker Desktop's
+WSL integration (or run `dockerd` in the distribution itself), and keep projects on the WSL2
+filesystem rather than under `/mnt/c`. Client and daemon then share a filesystem exactly as they do
+on a native Linux host.
+
+**macOS** — there is no WSL2 equivalent, so either run `sbclaude` inside a Linux VM that also runs
+the daemon, or log in to a Linux machine and run it there. Pointing `DOCKER_HOST` at a remote
+daemon from the Mac is not a third option: `sbclaude` refuses to start there, and none of the paths
+it would name exist on that daemon anyway.
+
+In a VM, the device flags (`--gpu`, `--x11`, `--wayland`, `--android`, `--usb`, `--ios`) want host
+hardware it does not have, and `--net host` means the VM's network, so an MCP server on the outer
+machine's `localhost` is out of reach.
+
+**The trap** — a bind mount whose source is missing on the daemon is not an error; `docker` creates
+an empty directory and mounts that instead. Usually this fails loudly, because an empty directory at
+`/usr/local/bin/claude` cannot be executed, so the box exits 126 the moment the entrypoint reaches
+it and the reason lands in syslog (see [When a box does not start](#when-a-box-does-not-start)). The
+patched `settings.json` is the exception. It is written with `tempfile`, so it lives in the
+_client's_ `/tmp`; where that is not also the daemon's, an empty directory lands over
+`~/.claude/settings.json` and the box comes up without `skipDangerousModePermissionPrompt=true` or
+`tui="fullscreen"`, so it stops at the bypass dialog those settings exist to remove. The bash
+sandbox stays off either way — the image's managed settings force that, and nothing mounted can
+override them. Set `TMPDIR` to a directory both sides can see.
+
 ## Install
 
 ```sh
