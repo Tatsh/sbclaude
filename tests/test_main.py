@@ -26,8 +26,50 @@ def test_main_refuses_a_non_linux_host(platform: str, runner: CliRunner, mocker:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     result = runner.invoke(main, ['run'])
     assert result.exit_code == 1
-    assert 'only runs on Linux' in result.output
+    assert 'supports Linux hosts only' in result.output
     assert not run.called
+
+
+@pytest.mark.parametrize('platform', ['darwin', 'win32'])
+def test_main_allows_a_non_linux_host_when_asked(platform: str, runner: CliRunner,
+                                                 mocker: MockerFixture,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, 'platform', platform)
+    monkeypatch.setenv('SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM', '1')
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    result = runner.invoke(main, ['run'])
+    assert result.exit_code == 0
+    assert 'is set, so the Linux check is skipped' in result.output
+    assert run.called
+
+
+@pytest.mark.parametrize('value', ['0', 'false', 'no', 'off', '', '  '])
+def test_main_bypass_needs_an_affirmative_value(value: str, runner: CliRunner,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, 'platform', 'darwin')
+    monkeypatch.setenv('SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM', value)
+    result = runner.invoke(main, ['run'])
+    assert result.exit_code == 1
+    assert 'supports Linux hosts only' in result.output
+
+
+@pytest.mark.parametrize(('args', 'cfg_binary'), [(['run', '--claude-binary', '/opt/claude'], None),
+                                                  (['run'], '/opt/claude')])
+def test_run_claude_binary_reaches_the_spec(args: list[str], cfg_binary: str | None,
+                                            runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(claude_binary=cfg_binary))
+    result = runner.invoke(main, args)
+    assert result.exit_code == 0
+    assert run.call_args[0][0].claude_binary == '/opt/claude'
+
+
+def test_run_claude_binary_flag_beats_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(claude_binary='/from/config'))
+    runner.invoke(main, ['run', '--claude-binary', '/from/flag'])
+    assert run.call_args[0][0].claude_binary == '/from/flag'
 
 
 @pytest.mark.parametrize(('option', 'expected'), [('--help', 'Usage:'), ('-h', 'Usage:'),
@@ -39,7 +81,7 @@ def test_main_help_and_version_survive_a_non_linux_host(expected: str, option: s
     result = runner.invoke(main, [option])
     assert result.exit_code == 0
     assert expected in result.output
-    assert 'only runs on Linux' not in result.output
+    assert 'supports Linux hosts only' not in result.output
 
 
 @pytest.mark.parametrize(
@@ -51,7 +93,7 @@ def test_main_refuses_every_subcommand_on_a_non_linux_host(args: list[str], runn
     box = mocker.patch('sbclaude.main.container')
     result = runner.invoke(main, args)
     assert result.exit_code == 1
-    assert 'only runs on Linux' in result.output
+    assert 'supports Linux hosts only' in result.output
     assert not box.method_calls
 
 

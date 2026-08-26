@@ -35,6 +35,15 @@ __all__ = ('Config', 'config_path', 'expand_paths', 'load_config')
 
 DEFAULT_NETWORK = 'host'
 """Default network for Docker."""
+_GLOBAL_ONLY_KEYS = frozenset({'claude_binary'})
+"""
+Keys honoured only from the global config, and ignored in a project's ``pyproject.toml``.
+
+``claude_binary`` names the executable the box runs as claude, with the mounted ``~/.claude``
+credentials within its reach. A checked-out repository choosing that would be arbitrary code
+execution on behalf of whoever cloned it, so this one setting does not follow the usual rule that
+project values win.
+"""
 
 
 def config_path() -> Path:
@@ -55,6 +64,18 @@ class Config:
 
     android: bool = False
     """Whether to mount the Android SDK and related devices."""
+    claude_binary: str | None = None
+    """
+    Host ``claude`` executable to mount, or ``None`` to take the first one on ``PATH``.
+
+    Naming one pins the session to a particular build rather than to whatever ``PATH`` reaches
+    first. ``~`` is expanded. It must be an executable file where sbclaude runs, which is checked
+    before the box starts, and it must also exist on the machine the Docker daemon runs on, since
+    that is where the bind-mount source is resolved.
+
+    Read from the global config only. A project's ``pyproject.toml`` cannot set it, because that
+    would let a cloned repository choose what runs as claude.
+    """
     cpus: str | None = None
     """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
     debian_mirror: str | None = None
@@ -170,9 +191,11 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
     """
     data = _tool_table(path or config_path())
     if project is not None and (proj := _tool_table(project / 'pyproject.toml')):
+        proj = {key: value for key, value in proj.items() if key not in _GLOBAL_ONLY_KEYS}
         env = {**_str_dict(data.get('env')), **_str_dict(proj.get('env'))}
         data = {**data, **proj, **({'env': env} if env else {})}
     return Config(android=bool(data.get('android', False)),
+                  claude_binary=(str(data['claude_binary']) if data.get('claude_binary') else None),
                   cpus=(str(data['cpus']) if data.get('cpus') is not None else None),
                   debian_mirror=(str(data['debian_mirror']) if data.get('debian_mirror') else None),
                   docker_args=_str_list(data.get('docker_args')),

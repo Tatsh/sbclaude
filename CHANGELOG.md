@@ -9,6 +9,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
 
+### Added
+
+- `--claude-binary PATH` (config key `claude_binary`) mounts that `claude` build instead of the
+  first one on `PATH`, which pins a session to a particular version rather than to whatever `PATH`
+  reaches first. It must be an executable file, checked before the box starts, because `docker`
+  would otherwise bind-mount a missing path as an empty directory and fail much later with nothing
+  pointing back at the setting. Alone among the config keys it is read from the global file only,
+  and a project's `pyproject.toml` cannot set it: it names what the box executes as claude, with
+  `~/.claude` mounted, so a cloned repository choosing it would be arbitrary code execution on
+  behalf of whoever cloned it.
+- `SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM=1` turns the non-Linux refusal into a warning, for a host
+  you are willing to arrange by hand. Nothing in a plain `sbclaude run` is Linux-only except the
+  binary, so a macOS session may work given an ELF `claude` for the container's architecture, every
+  mounted path on a filesystem Docker Desktop shares into its VM, and a shared `TMPDIR`. The device
+  flags still cannot work anywhere but Linux, and the packaging metadata still declares Linux only:
+  this is an escape hatch, not support. Only `1`, `on`, `true`, or `yes` lift the guard, so a stray
+  `=0` does not silently disable it.
+
 ## [0.1.0] - 2026-08-26
 
 ### Added

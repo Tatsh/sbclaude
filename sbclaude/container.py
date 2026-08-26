@@ -179,6 +179,8 @@ class RunSpec:
     """Extra arguments passed to ``docker run``."""
     claude_args: tuple[str, ...] = ()
     """Arguments forwarded to ``claude``."""
+    claude_binary: str | None = None
+    """Host ``claude`` executable to mount, or ``None`` to take the first one on ``PATH``."""
     cpus: str | None = None
     """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
     debian_mirror: str | None = None
@@ -413,9 +415,18 @@ def unique_name(project: Path) -> str:
     return f'{default_name(project)}-{secrets.token_hex(3)}'
 
 
-def claude_binary() -> Path:
+def claude_binary(override: str | None = None) -> Path:
     """
     Locate the real host ``claude`` binary, resolving any version symlink.
+
+    ``override`` names a build directly instead of taking whichever one ``PATH`` happens to reach
+    first. That is how a session is pinned to a particular version, or given an ELF build on a host
+    whose own ``claude`` is not one.
+
+    Parameters
+    ----------
+    override : str | None
+        Path to the executable to use, with ``~`` expanded, or ``None`` to search ``PATH``.
 
     Returns
     -------
@@ -425,8 +436,16 @@ def claude_binary() -> Path:
     Raises
     ------
     FileNotFoundError
-        If ``claude`` is not on ``PATH``.
+        If ``claude`` is not on ``PATH``, or ``override`` does not name an executable file.
     """
+    if override:
+        # Checked here rather than left to docker, which would bind-mount a missing path as an
+        # empty directory and fail much later with nothing pointing back at this setting.
+        candidate = Path(override).expanduser()
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            msg = f'{candidate} is not an executable file'
+            raise FileNotFoundError(msg)
+        return candidate.resolve()
     if not (found := which('claude')):
         msg = "'claude' not found on PATH"
         raise FileNotFoundError(msg)
@@ -543,8 +562,8 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         '--label', f'{PROJECT_LABEL}={spec.project}', '--network', spec.network, '-e',
         f'HOST_UID={uid}', '-e', f'HOST_GID={gid}', '-e', f'HOST_USER={user}', '-e',
         f'HOST_HOME={home}', '-e', f'TERM={os.environ.get("TERM", "xterm-256color")}',
-        *_v(claude_binary(), '/usr/local/bin/claude', ro=True), *_v(cfg_dir), *_v(spec.project),
-        '-w',
+        *_v(claude_binary(spec.claude_binary), '/usr/local/bin/claude', ro=True), *_v(cfg_dir),
+        *_v(spec.project), '-w',
         str(spec.project)
     ]
     if os.environ.get('CLAUDE_CONFIG_DIR'):

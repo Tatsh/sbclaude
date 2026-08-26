@@ -35,13 +35,15 @@ and permission prompts **disabled**, against a configurable set of host bind mou
 container stores nothing of its own (`--rm`); everything lives on the host. You only ever
 invoke `sbclaude` — it manages its own image and containers via the Docker SDK.
 
-**The host must be Linux.** This is not a packaging gap that could be closed later: the host copy
-of `claude` is bind-mounted into a Linux container and executed there, so the host must supply an
-ELF build of it (a macOS host has a Mach-O one, which cannot run in the container); the identity
-mirroring reads `os.getuid()`; and every device and socket the run flags pass through
-(`/dev/nvidia*`, `/dev/dri`, `/dev/kvm`, `/dev/bus/usb`, `/tmp/.X11-unix`, `/run/user/<uid>`,
-`/var/run/usbmuxd`) is a Linux one. `sbclaude` refuses to start anywhere else rather than failing
-later with a Docker error.
+**The host must be Linux.** The host copy of `claude` is bind-mounted into a Linux container and
+executed there, so the host must supply an ELF build of it (a Mac's own `claude` is Mach-O and
+cannot run in the container); the identity mirroring reads `os.getuid()`, for which Windows has no
+equivalent; and every device and socket the run flags pass through (`/dev/nvidia*`, `/dev/dri`,
+`/dev/kvm`, `/dev/bus/usb`, `/tmp/.X11-unix`, `/run/user/<uid>`, `/var/run/usbmuxd`) is a Linux
+one. `sbclaude` refuses to start anywhere else rather than failing later with a Docker error. That
+refusal can be lifted for a host you are prepared to set up by hand — see
+[Running from a non-Linux host](#running-from-a-non-linux-host) — but nothing beyond Linux is
+tested or supported.
 
 There is a single image, `sbclaude`, built on demand. It bundles everyday coding tools
 (Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv, jq), formatters and
@@ -87,14 +89,30 @@ WSL integration (or run `dockerd` in the distribution itself), and keep projects
 filesystem rather than under `/mnt/c`. Client and daemon then share a filesystem exactly as they do
 on a native Linux host.
 
-**macOS** — there is no WSL2 equivalent, so either run `sbclaude` inside a Linux VM that also runs
-the daemon, or log in to a Linux machine and run it there. Pointing `DOCKER_HOST` at a remote
-daemon from the Mac is not a third option: `sbclaude` refuses to start there, and none of the paths
-it would name exist on that daemon anyway.
+**macOS** — there is no WSL2 equivalent, so the straightforward answers are to run `sbclaude`
+inside a Linux VM that also runs the daemon, or to log in to a Linux machine and run it there.
 
-In a VM, the device flags (`--gpu`, `--x11`, `--wayland`, `--android`, `--usb`, `--ios`) want host
-hardware it does not have, and `--net host` means the VM's network, so an MCP server on the outer
-machine's `localhost` is out of reach.
+Running it on the Mac itself is refused by default, but the refusal is a guard rather than a hard
+limit, and `SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM=1` turns it into a warning. Nothing in a plain
+`sbclaude run` is Linux-only except the binary: `Path.home()`, `os.getuid()`, and
+`getpass.getuser()` are all POSIX, and every `/dev` and `/run/user` path sits behind an opt-in
+flag. So a session can work, but it is on you to:
+
+- point `--claude-binary` at an **ELF** build of `claude` matching the container's architecture
+  (`linux/arm64` on Apple Silicon), since the Mac's own `claude` is Mach-O and cannot execute in
+  the box;
+- keep `~/.claude`, the project, and that binary under a path Docker Desktop shares into its VM
+  (`/Users` is shared by default), so the daemon can resolve every bind-mount source;
+- set `TMPDIR` somewhere shared, or the trap below bites;
+- expect `--net host` to mean Docker Desktop's VM rather than the Mac, so `--net bridge` is usually
+  wanted; an MCP server running on the Mac is then reachable as `host.docker.internal`, but not at
+  the `localhost` its config almost certainly names;
+- set `memory` yourself, since the automatic cap reads `SC_PHYS_PAGES`, which macOS does not
+  define, so it silently does not apply.
+
+The device flags (`--gpu`, `--x11`, `--wayland`, `--android`, `--usb`, `--ios`) cannot work in
+either case: they want host devices that neither Docker Desktop's VM nor a Linux VM has. The
+packaging still declares Linux only.
 
 **The trap** — a bind mount whose source is missing on the daemon is not an error; `docker` creates
 an empty directory and mounts that instead. Usually this fails loudly, because an empty directory at
@@ -195,6 +213,7 @@ more than one is running).
 | `--gpg`             | mount the host GnuPG home + agent socket for signing commits                     |
 | `--sudo`            | passwordless `sudo` in the box (drops `no-new-privileges`)                       |
 | `--venv-dir DIR`    | put the box's virtualenv in `DIR` (e.g. a volume) instead of beside the project  |
+| `--claude-binary`   | mount this `claude` build instead of the first one on `PATH`                     |
 | `--no-modify`       | stop sbclaude writing anything into the project directory                        |
 | `--no-fullscreen`   | do not force the fullscreen TUI, so a failing session's output survives          |
 | `--session-recover` | install `cc-session-recover` (auto-resume) into the project on start             |
@@ -238,6 +257,7 @@ x11 = true       # forward X11 for GUI apps
 # recover = true                  # install cc-session-recover into every project (off by default)
 # modify = false                  # never write into the project directory (same as --no-modify)
 # venv_dir = "/venv-cache"        # hold the box's virtualenv here (pair with a docker_args volume)
+# claude_binary = "~/bin/claude"  # mount this claude build rather than the first one on PATH
 # fullscreen = false              # do not force the fullscreen TUI (keeps start-up errors visible)
 pass_env = ["AWS_REGION"]                          # forward host vars (AWS_PROFILE is default)
 ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"] # read-only mounts (globs + ~ ok)
@@ -319,6 +339,18 @@ writing anything into the directory it was launched from. Three things are suppr
 
 This constrains **sbclaude**, not Claude: the project is still bind-mounted read-write and the
 agent can edit it exactly as before.
+
+**Which `claude` gets mounted** — by default, whichever one `PATH` reaches first.
+`--claude-binary PATH` (config key `claude_binary`) names one instead, which is how you pin a
+session to a particular build rather than to whatever `PATH` reaches first. It must be an
+executable file — that is checked up front, because `docker` would otherwise bind-mount a missing
+path as an empty directory and fail much later with nothing pointing back at the setting. Like
+every other mount, it has to exist on the machine the daemon runs on.
+
+Unlike every other key, `claude_binary` is read from the **global** config only: a project's
+`pyproject.toml` cannot set it. It names what the box executes as claude, with your `~/.claude`
+credentials mounted, so letting a cloned repository choose it would be arbitrary code execution on
+behalf of whoever cloned it.
 
 **Alternate config dir** — if `CLAUDE_CONFIG_DIR` is set on the host, sbclaude mounts that
 directory (its `.claude.json`, `settings.json`, history) and points claude at it inside the

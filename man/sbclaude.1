@@ -37,7 +37,7 @@ Run Claude Code in a throwaway Docker container with no sandbox and no permissio
 .sp
 Run Claude Code in a throwaway Docker container (no sandbox, no prompts).
 .sp
-The host must be Linux.
+The host must be Linux, unless SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM is set.
 .sp
 With no subcommand, behaves like \fIsbclaude run\fP using config defaults.
 .sp
@@ -160,6 +160,11 @@ Container name (default: sbclaude\-<project>).
 .TP
 .B \-i, \-\-image <image>
 Image override.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-claude\-binary <claude_binary>
+Host claude executable to mount instead of the first one on PATH. Use this to pin a version, or to supply an ELF build.
 .UNINDENT
 .INDENT 0.0
 .TP

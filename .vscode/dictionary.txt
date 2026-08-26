@@ -65,8 +65,10 @@ functools
 fxaa
 genindex
 getgid
+getpass
 getpwuid
 getuid
+getuser
 ghidra
 ghidra's
 girepository

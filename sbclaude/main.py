@@ -18,11 +18,22 @@ __all__ = ('main',)
 
 DEFAULT_PASS_ENV = ('AWS_PROFILE',)
 """Host environment variables forwarded into the box by default when set."""
-UNSUPPORTED_PLATFORM = ('sbclaude only runs on Linux. The host copy of claude is bind-mounted into '
-                        'a Linux container and executed there, so the host must supply an ELF '
-                        'build of it. Every device and socket the run flags pass through is a '
-                        'Linux one too.')
-"""Refusal shown on a host where the box could never start."""
+ALLOW_UNSUPPORTED_PLATFORM = 'SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM'
+"""Environment variable that turns the non-Linux refusal into a warning."""
+_AFFIRMATIVE = frozenset({'1', 'on', 'true', 'yes'})
+"""Values that count as setting a boolean environment variable."""
+UNSUPPORTED_PLATFORM = ('sbclaude supports Linux hosts only. The host copy of claude is '
+                        'bind-mounted into a Linux container and executed there, so the host must '
+                        'supply an ELF build of it. Every device and socket the run flags pass '
+                        f'through is a Linux one too. Set {ALLOW_UNSUPPORTED_PLATFORM}=1 to try '
+                        'anyway.')
+"""Refusal shown on a non-Linux host."""
+UNSUPPORTED_PLATFORM_WARNING = (
+    f'sbclaude: {ALLOW_UNSUPPORTED_PLATFORM} is set, so the Linux check is skipped. Nothing about '
+    "this is supported. Point --claude-binary at an ELF build for the container's architecture, "
+    'keep every path sbclaude mounts on a filesystem the Docker daemon can see, and expect the '
+    'device flags to do nothing.')
+"""Warning shown in place of the refusal when the check is bypassed."""
 
 
 @click.group(invoke_without_command=True, context_settings={'help_option_names': ('-h', '--help')})
@@ -32,12 +43,16 @@ def main(ctx: click.Context) -> None:
     """
     Run Claude Code in a throwaway Docker container (no sandbox, no prompts).
 
-    The host must be Linux.
+    The host must be Linux, unless SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM is set.
 
     With no subcommand, behaves like `sbclaude run` using config defaults.
     """  # noqa: DOC501
     if sys.platform != 'linux':
-        raise click.ClickException(UNSUPPORTED_PLATFORM)
+        # An allow-list rather than mere presence: a guard that `=0` switches off is worse than no
+        # guard, because it reads as though it is still on.
+        if os.environ.get(ALLOW_UNSUPPORTED_PLATFORM, '').strip().lower() not in _AFFIRMATIVE:
+            raise click.ClickException(UNSUPPORTED_PLATFORM)
+        click.echo(UNSUPPORTED_PLATFORM_WARNING, err=True)
     if ctx.invoked_subcommand is None:
         ctx.invoke(run)
 
@@ -51,6 +66,9 @@ def main(ctx: click.Context) -> None:
 @click.option('-r', '--ro', 'ro_extra', multiple=True, help='Extra read-only mount.')
 @click.option('-n', '--name', help='Container name (default: sbclaude-<project>).')
 @click.option('-i', '--image', help='Image override.')
+@click.option('--claude-binary',
+              help='Host claude executable to mount instead of the first one on PATH. Use this to '
+              'pin a version, or to supply an ELF build.')
 @click.option('--debian-mirror',
               help='Debian archive mirror to bake in if the image is (re)built, e.g. '
               'http://ftp.us.debian.org/debian.')
@@ -137,6 +155,7 @@ def run(
     memory: str | None,
     cpus: str | None,
     venv_dir: str | None,
+    claude_binary: str | None,
     claude_args: tuple[str, ...],
     *,
     use_re: bool,
@@ -184,6 +203,7 @@ def run(
         session_recover = False
     spec = container.RunSpec(project=proj,
                              name=name or container.unique_name(proj),
+                             claude_binary=claude_binary or cfg.claude_binary,
                              network=network or cfg.network,
                              image=image or cfg.image,
                              use_re=use_re,

@@ -82,6 +82,30 @@ def test_load_config_fullscreen_false(tmp_path: Path) -> None:
     assert load_config(path).fullscreen is False
 
 
+def test_load_config_claude_binary_default_none(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    assert load_config(path).claude_binary is None
+
+
+def test_load_config_claude_binary(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nclaude_binary = "/opt/claude/claude"\n')
+    assert load_config(path).claude_binary == '/opt/claude/claude'
+
+
+def test_load_config_claude_binary_is_not_project_overridable(tmp_path: Path) -> None:
+    global_path = tmp_path / 'config.toml'
+    global_path.write_text('[tool.sbclaude]\nclaude_binary = "/trusted/claude"\n')
+    project = tmp_path / 'proj'
+    project.mkdir()
+    (project /
+     'pyproject.toml').write_text('[tool.sbclaude]\nclaude_binary = "./evil"\nx11 = true\n')
+    cfg = load_config(global_path, project=project)
+    assert cfg.claude_binary == '/trusted/claude'
+    assert cfg.x11 is True
+
+
 def test_load_config_modify_default_true(tmp_path: Path) -> None:
     path = tmp_path / 'config.toml'
     path.write_text('[tool.sbclaude]\nnetwork = "host"\n')

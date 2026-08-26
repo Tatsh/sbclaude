@@ -149,6 +149,79 @@ def test_claude_binary_missing(mocker: MockerFixture) -> None:
         container.claude_binary()
 
 
+def test_claude_binary_override_is_used(mocker: MockerFixture, tmp_path: Path) -> None:
+    which = mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    override = tmp_path / 'claude'
+    override.write_text('')
+    override.chmod(0o755)
+    assert container.claude_binary(str(override)) == override
+    assert not which.called
+
+
+def test_claude_binary_override_expands_home(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'HOME': str(tmp_path)})
+    override = tmp_path / 'claude'
+    override.write_text('')
+    override.chmod(0o755)
+    assert container.claude_binary('~/claude') == override
+
+
+@pytest.mark.parametrize('directory', [True, False])
+def test_claude_binary_override_must_be_an_executable_file(tmp_path: Path, *,
+                                                           directory: bool) -> None:
+    target = tmp_path / 'claude'
+    if directory:
+        target.mkdir()
+        target.chmod(0o755)
+    else:
+        target.write_text('')
+        target.chmod(0o644)
+    with pytest.raises(FileNotFoundError):
+        container.claude_binary(str(target))
+
+
+def test_claude_binary_override_resolves_a_version_symlink(tmp_path: Path) -> None:
+    target = tmp_path / 'claude-1.2.3'
+    target.write_text('')
+    target.chmod(0o755)
+    link = tmp_path / 'claude'
+    link.symlink_to(target)
+    assert container.claude_binary(str(link)) == target.resolve()
+
+
+def test_build_run_argv_mounts_a_relative_override_at_its_absolute_path(
+        mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    override = tmp_path / 'elf-claude'
+    override.write_text('')
+    override.chmod(0o755)
+    project = tmp_path / 'p'
+    project.mkdir()
+    monkeypatch.chdir(tmp_path)
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', claude_binary='elf-claude'))
+    # Docker reads a source with no slash in it as a named volume, so a relative path would mount
+    # an empty volume over the binary rather than the file.
+    assert f'{override.resolve()}:/usr/local/bin/claude:ro' in argv
+    assert 'elf-claude:/usr/local/bin/claude:ro' not in argv
+
+
+def test_build_run_argv_mounts_the_overridden_binary(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    override = tmp_path / 'elf-claude'
+    override.write_text('')
+    override.chmod(0o755)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', claude_binary=str(override)))
+    assert f'{override}:/usr/local/bin/claude:ro' in argv
+    assert '/usr/bin/claude:/usr/local/bin/claude:ro' not in argv
+
+
 def test_build_run_argv_basic(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
