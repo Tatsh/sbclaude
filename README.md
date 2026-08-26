@@ -6,7 +6,7 @@
 [![PyPI - Version](https://img.shields.io/pypi/v/sbclaude)](https://pypi.org/project/sbclaude/)
 [![GitHub tag (with filter)](https://img.shields.io/github/v/tag/Tatsh/sbclaude)](https://github.com/Tatsh/sbclaude/tags)
 [![License](https://img.shields.io/github/license/Tatsh/sbclaude)](https://github.com/Tatsh/sbclaude/blob/master/LICENSE.txt)
-[![GitHub commits since latest release (by SemVer including pre-releases)](https://img.shields.io/github/commits-since/Tatsh/sbclaude/v0.0.1/master)](https://github.com/Tatsh/sbclaude/compare/v0.0.1...master)
+[![GitHub commits since latest release (by SemVer including pre-releases)](https://img.shields.io/github/commits-since/Tatsh/sbclaude/v0.1.0/master)](https://github.com/Tatsh/sbclaude/compare/v0.1.0...master)
 [![CodeQL](https://github.com/Tatsh/sbclaude/actions/workflows/codeql.yml/badge.svg)](https://github.com/Tatsh/sbclaude/actions/workflows/codeql.yml)
 [![QA](https://github.com/Tatsh/sbclaude/actions/workflows/qa.yml/badge.svg)](https://github.com/Tatsh/sbclaude/actions/workflows/qa.yml)
 [![Tests](https://github.com/Tatsh/sbclaude/actions/workflows/tests.yml/badge.svg)](https://github.com/Tatsh/sbclaude/actions/workflows/tests.yml)

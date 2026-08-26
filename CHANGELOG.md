@@ -9,6 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
 
+## [0.1.0] - 2026-08-26
+
 ### Added
 
 - `--wayland` (config key `wayland`) forwards the host compositor socket into the box, re-homed
@@ -16,11 +18,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cookie granting access to the whole session.
 - `--gpu` now also passes through the DRM render nodes (`/dev/dri/renderD*`), so Mesa on
   AMD/Intel and Vulkan/VA-API work, not only CUDA.
-- `webshot`, a GPU-accelerated Chromium screenshot and visual-diff tool, is installed in the
-  image with Chromium baked in, so no project needs a per-repo browser download.
-- `scaffold-noclip` writes a project-side visual-regression harness (`viewer-tests/`, baselines,
-  and a getting-started guide) driving `webshot`. Existing files are never overwritten without
-  `--force`.
+- `webshot`, a GPU-accelerated screenshot and visual-diff tool, is installed in the image with
+  Chromium baked in, so no project needs a per-repo browser download.
+- `scaffold-noclip` writes a project-side visual-regression harness driven by `webshot`
+  (`viewer-tests/`, baselines, and a getting-started guide). Existing files are never overwritten
+  without `--force`.
 - `--sudo` (config key `sudo`) gives the mapped user passwordless `sudo` in the box, so `sudo su`
   and `sudo apt-get install` work. It drops `--security-opt no-new-privileges` for that box, which
   is unavoidable: `no_new_privs` makes the kernel ignore the setuid bit `sudo` depends on. The
@@ -28,18 +30,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   restores it on `sudo` alone and only for a `--sudo` box.
 - `sbclaude shell --root` opens the shell as root, which is what `shell` used to do
   unconditionally.
-- A box that fails to start is retried, three attempts in all, after which sbclaude says so. The
-  docker exit codes that mean the container never ran (125–127) and a session that dies within
-  seconds both count as a failure to start; a session that ran and then ended never does. The
-  command is rebuilt for each attempt, so a GPU woken by the previous attempt's probe is picked up
-  by the next. Docker's own message plus the `docker run` command behind it goes to syslog
+- A box that fails to start is launched again, three attempts in all, after which sbclaude exits
+  with the last code and says why. A Docker exit code meaning the container never ran (125–127),
+  and a session that dies within seconds, each count as a failure to start; a session that ran and
+  then ended never does. The command is rebuilt for each attempt, so a GPU woken by the previous
+  attempt's probe is picked up by the next. Docker's own message plus the `docker run` command
+  behind it goes to syslog
   (`journalctl -t sbclaude`), which survives a terminal that does not. `-d/--debug` logs the same
   command before launching.
-- `--gpu` no longer starts a box that cannot run. `--gpus all` is passed only once `nvidia-smi -L`
-  lists a device, retried a few times since that call is also what resumes a card parked at
-  D3cold; otherwise the box starts on the DRM render nodes alone with a warning. Asking the daemon
-  for an unresolvable `nvidia.com/gpu=all` only warns in its log, then kills the container half a
-  second later.
 - `--no-fullscreen` (config key `fullscreen`) stops forcing claude's fullscreen TUI. The TUI draws
   on the terminal's alternate screen, which is discarded on exit, so a session that failed on start
   took its own error message with it.
@@ -50,16 +48,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   creates it and hands it to the mapped user, which is what makes a fresh named volume usable.
 - `--no-modify` (config key `modify`) stops sbclaude writing into the project directory: no
   `/.sbclaude-venv/` line appended to `.gitignore`, the box's virtualenv redirected to
-  `/tmp/sbclaude-venv-<project>` inside the container, no start-up `uv sync` (it refreshes
+  `/tmp/sbclaude-venv-<project>-<digest>` inside the container, no start-up `uv sync` (it refreshes
   `uv.lock`), and no `cc-session-recover` install. It constrains sbclaude only — the project is
   still mounted read-write for Claude itself.
 
 ### Changed
 
-- The host must now be Linux, which it has always had to be in practice. The host copy of `claude`
-  is bind-mounted into a Linux container and executed there, so an ELF build of it has to exist on
-  the host; the identity mirroring reads `os.getuid()`; and every device and socket the run flags
-  pass through is a Linux one. `sbclaude` now refuses to start on any other host rather than
+- sbclaude now requires a Linux host, which it has needed in practice all along. The host copy of
+  `claude` is bind-mounted into a Linux container and executed there, so an ELF build of it has to
+  exist on the host; the identity mirroring reads `os.getuid()`; and every device and socket the
+  run flags pass through is a Linux one. It now refuses to start on any other host rather than
   failing later with a Docker error, and the packaging carries an
   `Operating System :: POSIX :: Linux` classifier.
 - `sbclaude shell` now opens a login shell as the user the box mirrors, rather than as root. The
@@ -83,17 +81,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The asset URL is now read from the releases feed, which skips an empty or half-published release.
 - `--gpg` could no longer sign once `/run/user/<uid>` existed in the box, which `--wayland` and
   `--ssh` both arrange. The agent socket was overlaid only at `~/.gnupg/S.gpg-agent`, the path
-  `gpg` falls back to when it has no usable runtime directory; with one, it looks in
+  `gpg` falls back to when it has no usable runtime directory; with one, it looked in
   `/run/user/<uid>/gnupg` instead, found nothing, and silently started its own agent inside the
-  box, which can only reach `pinentry-curses` and so failed with "Inappropriate ioctl for device"
+  box, which can only reach `pinentry-curses` and so failed with `Inappropriate ioctl for device`
   on a TTY-less box. The socket is now overlaid at both paths.
+- `--gpu` no longer starts a box that cannot run. `--gpus all` is passed only once `nvidia-smi -L`
+  lists a device, retried a few times since that call is also what resumes a card parked at
+  D3cold; otherwise the box starts on the DRM render nodes alone with a warning. An unresolvable
+  `nvidia.com/gpu=all` is only a warning in the daemon's log, but it kills the container half a
+  second later.
 - `--gpu` left the GPU unusable: the supplementary device groups Docker granted were dropped when
   the entrypoint switched to the mapped user, and the driver capability set omitted `graphics`, so
-  anything that rendered silently fell back to software.
+  anything that rendered fell back to software silently.
 - The glvnd, Vulkan, and GBM manifests the NVIDIA container toolkit does not install are now
   synthesised at start-up, so GL, EGL, and Vulkan clients find the real driver.
-- `~/.config` is no longer left root-owned when something is mounted beneath it, which had made
-  Chrome abort at start-up.
+- `~/.config` is no longer left root-owned when something is mounted beneath it, which made Chrome
+  abort at start-up.
 
 ### Removed
 
