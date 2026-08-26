@@ -22,8 +22,6 @@ capsys
 cdrommsf
 chowning
 cmdline
-codesign
-colorlog
 commitizen
 conftest
 coveragerc
@@ -58,7 +56,6 @@ esbenp
 esbonio
 excinfo
 execve
-filevers
 flathub
 fowner
 foxundermoon
@@ -103,7 +100,6 @@ jsonnet
 jsonnetfmt
 jsonschema
 kwargs
-lastexitcode
 launchable
 lextudio
 libao
@@ -164,12 +160,10 @@ nopasswd
 noqa
 norecursedirs
 nosystem
-notarytool
 nullglob
 numpy
 nvidiactl
 nvml
-onefile
 oneline
 openlog
 passthrough
@@ -185,7 +179,6 @@ pngdefry
 preapproved
 privs
 proc
-prodvers
 pycache
 pydantic
 pydocstyle
@@ -218,7 +211,6 @@ shellformat
 shntool
 shopt
 signingkey
-signtool
 sigtrap
 sigwinch
 skhan
@@ -243,7 +235,6 @@ tmpfs
 tomlkit
 tomllib
 tomlq
-tonumber
 tostring
 trustdb
 tryfirst
@@ -258,7 +249,6 @@ userspace
 vars
 vendored
 venv
-vers
 vgmstream
 virtualenv
 vsync
@@ -274,7 +264,6 @@ worktree
 writable
 xauth
 xauthority
-xcrun
 xdev
 xhost
 xterm
