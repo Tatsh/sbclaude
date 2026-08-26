@@ -73,57 +73,31 @@ Android SDK, jadx, and apktool).
 
 ## Running from a non-Linux host
 
-This is unsupported, but the reason is narrow enough to work around, and there is one trap that is
-not obvious until it bites.
+This is unsupported, but it can be done with caveats. Most flags such as `--gpu`, `--x11`,
+`--wayland`, etc will not work.
 
-The remaining constraint is not the operating system as such: `docker` resolves bind-mount sources
-on the **daemon's** filesystem, not the client's. `sbclaude` leans on that: `~/.claude` and the
-project are mounted at their own absolute paths, so a path you paste into a prompt resolves
-identically inside the box, and the host's `claude` binary is mounted at `/usr/local/bin/claude`.
-Every one of those sources has to exist on the daemon. On a Linux host the client and the daemon
-share one filesystem and this comes free; anywhere else it is something you have to arrange.
+Note that `docker` will not show an error if bind mount is missing to the daemon. You will need to
+make sure all paths are correct.
 
-**Windows** — use WSL2, which is a Linux environment rather than an emulation layer, so nothing
-needs arranging. Install `sbclaude` and `claude` inside the distribution, turn on Docker Desktop's
-WSL integration (or run `dockerd` in the distribution itself), and keep projects on the WSL2
-filesystem rather than under `/mnt/c`. Client and daemon then share a filesystem exactly as they do
-on a native Linux host.
+### Windows
 
-**macOS** — there is no WSL2 equivalent, so the straightforward answers are to run `sbclaude`
-inside a Linux VM that also runs the daemon, or to log in to a Linux machine and run it there.
+Use WSL2. Install `sbclaude` and `claude` inside the distribution, turn on Docker Desktop's WSL
+integration (or run `dockerd` in the distribution itself), and keep projects on the WSL2 filesystem
+rather than under `/mnt/c`.
 
-Running it on the Mac itself is refused by default, but the refusal is a guard rather than a hard
-limit, and `SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM=1` turns it into a warning. Nothing in a plain
-`sbclaude run` is Linux-only except the binary: `Path.home()`, `os.getuid()`, and
-`getpass.getuser()` are all POSIX, and every `/dev` and `/run/user` path sits behind an opt-in
-flag. So a session can work, but it is on you to:
+### macOS
 
-- point `--claude-binary` at an **ELF** build of `claude` matching the container's architecture
-  (`linux/arm64` on Apple Silicon), since the Mac's own `claude` is Mach-O and cannot execute in
-  the box;
-- keep `~/.claude`, the project, and that binary under a path Docker Desktop shares into its VM
-  (`/Users` is shared by default), so the daemon can resolve every bind-mount source;
-- set `TMPDIR` somewhere shared, or the trap below bites;
-- expect `--net host` to mean Docker Desktop's VM rather than the Mac, so `--net bridge` is usually
-  wanted; an MCP server running on the Mac is then reachable as `host.docker.internal`, but not at
-  the `localhost` its config almost certainly names;
-- set `memory` yourself, since the automatic cap reads `SC_PHYS_PAGES`, which macOS does not
-  define, so it silently does not apply.
+1. Set environment variable `SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM=1`.
 
-The device flags (`--gpu`, `--x11`, `--wayland`, `--android`, `--usb`, `--ios`) cannot work in
-either case: they want host devices that neither Docker Desktop's VM nor a Linux VM has. The
-packaging still declares Linux only.
+1. Pass `--claude-binary` with the path to a Linux build of `claude`. This must match the container
+   architecture.
 
-**The trap** — a bind mount whose source is missing on the daemon is not an error; `docker` creates
-an empty directory and mounts that instead. Usually this fails loudly, because an empty directory at
-`/usr/local/bin/claude` cannot be executed, so the box exits 126 the moment the entrypoint reaches
-it and the reason lands in syslog (see [When a box does not start](#when-a-box-does-not-start)). The
-patched `settings.json` is the exception. It is written with `tempfile`, so it lives in the
-_client's_ `/tmp`; where that is not also the daemon's, an empty directory lands over
-`~/.claude/settings.json` and the box comes up without `skipDangerousModePermissionPrompt=true` or
-`tui="fullscreen"`, so it stops at the bypass dialog those settings exist to remove. The bash
-sandbox stays off either way — the image's managed settings force that, and nothing mounted can
-override them. Set `TMPDIR` to a directory both sides can see.
+1. Keep `~/.claude`, the project, and the `claude` binary under a path Docker Desktop shares into
+   its VM (`/Users` is shared by default).
+
+1. Set `TMPDIR` somewhere to somewhere shared such as `~/Library/Caches/sbclaude`.
+
+You will probably want to use `--net bridge` instead of `--net host`.
 
 ## Install
 
