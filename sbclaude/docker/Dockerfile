@@ -148,6 +148,26 @@ RUN wget -qO /usr/local/bin/czkawka_cli \
 RUN git clone --depth 1 https://github.com/Tatsh/pngdefry /tmp/pngdefry \
     && cc -O2 -o /usr/local/bin/pngdefry /tmp/pngdefry/source/pngdefry.c \
     && rm -rf /tmp/pngdefry
+# Rust, for repositories whose build compiles to WebAssembly (noclip.website and the like).
+# rustup rather than Debian's rustc: bookworm ships 1.63, and a crate declaring `edition = "2024"`
+# needs 1.85 or newer, so `apt install rustc` produces a toolchain that cannot parse the manifest.
+# `cargo-run-bin` supplies the `cargo bin` subcommand that such projects invoke to fetch pinned
+# build tools (wasm-bindgen-cli, wasm-opt) named in `[package.metadata.bin]`; without it a
+# toolchain alone still fails at the first build step. It is installed with `--root /usr/local` so
+# the binary lands on the default PATH rather than in a CARGO_HOME that is thrown away below.
+# RUSTUP_HOME is baked into /opt and left root-owned, which is safe because the shims only read it.
+# CARGO_HOME is deliberately NOT set: it falls back to $HOME/.cargo, which is writable by the
+# unprivileged runtime user and can be bind-mounted (`rw = ["~/.cargo"]`) to keep the registry and
+# git checkouts across boxes. The build's own CARGO_HOME is discarded to keep the layer small.
+ENV RUSTUP_HOME=/opt/rustup
+RUN set -eux; \
+    export CARGO_HOME=/opt/cargo; \
+    curl -fsSL https://sh.rustup.rs \
+        | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path; \
+    /opt/cargo/bin/rustup target add wasm32-unknown-unknown; \
+    /opt/cargo/bin/cargo install cargo-run-bin --locked --root /usr/local; \
+    rm -rf /opt/cargo/registry /opt/cargo/git; \
+    chmod -R a+rX /opt/rustup /opt/cargo
 # Formatters and linters, each the latest upstream release at build time: clang-format (the
 # LLVM wheel, newer than Debian's), jsonnet + jsonnetfmt (go-jsonnet), and shellcheck. The
 # go-jsonnet version is read from the releases/latest redirect rather than api.github.com,
@@ -189,10 +209,10 @@ RUN printf '%s\n' \
     'export ANDROID_HOME=/opt/android-sdk' \
     'export ANDROID_SDK_ROOT=/opt/android-sdk' \
     'export GHIDRA_INSTALL_DIR=/usr/share/ghidra' \
-    'export PATH=/opt/venv/bin:$JAVA_HOME/bin:/opt/jadx-bin/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/emulator:/opt/android-sdk/cmdline-tools/latest/bin:/usr/local/bin:$PATH' \
+    'export PATH=/opt/venv/bin:$JAVA_HOME/bin:/opt/cargo/bin:/opt/jadx-bin/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/emulator:/opt/android-sdk/cmdline-tools/latest/bin:/usr/local/bin:$PATH' \
     > /etc/profile.d/sbclaude.sh
 # Environment (Python virtualenv first).
-ENV PATH=/opt/venv/bin:/usr/lib/jvm/temurin-21-jdk-amd64/bin:/opt/jadx-bin/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/emulator:/opt/android-sdk/cmdline-tools/latest/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin \
+ENV PATH=/opt/venv/bin:/usr/lib/jvm/temurin-21-jdk-amd64/bin:/opt/cargo/bin:/opt/jadx-bin/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/emulator:/opt/android-sdk/cmdline-tools/latest/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin \
     JAVA_HOME=/usr/lib/jvm/temurin-21-jdk-amd64 \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \

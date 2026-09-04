@@ -48,10 +48,15 @@ tested or supported.
 There is a single image, `sbclaude`, built on demand. It bundles everyday coding tools
 (Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv, jq), formatters and
 linters kept at their latest upstream release (clang-format, jsonnet, jsonnetfmt, shellcheck), Qt 6
-development (`qt6-base-dev` plus ninja), `webshot` (a GPU Chrome driver for screenshots and
-visual diffs, with Chromium baked in), and a mobile reverse-engineering toolchain (a JDK,
-frida, mitmproxy, dex2jar, baksmali/smali, and launchers for the host-mounted Ghidra,
-Android SDK, jadx, and apktool).
+development (`qt6-base-dev` plus ninja), a Rust toolchain (rustup stable with the
+`wasm32-unknown-unknown` target and `cargo bin`, for repositories that build WebAssembly),
+`webshot` (a GPU Chrome driver for screenshots and visual diffs, with Chromium baked in), and a
+mobile reverse-engineering toolchain (a JDK, frida, mitmproxy, dex2jar, baksmali/smali, and
+launchers for the host-mounted Ghidra, Android SDK, jadx, and apktool).
+
+Cargo keeps its registry in `$HOME/.cargo`, which is part of the box and goes away with it, so a
+Rust build starts from an empty cache each time. Add `rw = ["~/.cargo"]` to keep the downloaded
+crates and git checkouts on the host between boxes.
 
 ## How it works
 

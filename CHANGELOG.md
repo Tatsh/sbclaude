@@ -11,6 +11,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A Rust toolchain in the image: rustup stable with the `wasm32-unknown-unknown` target, plus
+  `cargo-run-bin` for the `cargo bin` subcommand. Debian's own `rustc` is not used because bookworm
+  ships 1.63 and a crate declaring `edition = "2024"` needs 1.85 or newer, so `apt install rustc`
+  yields a toolchain that cannot parse the manifest at all. `cargo bin` is installed alongside it
+  because projects pinning their build tools through `[package.metadata.bin]` (wasm-bindgen-cli,
+  wasm-opt) invoke it from their own build scripts, and a toolchain without it still fails at the
+  first step. `RUSTUP_HOME` is baked into `/opt` and left root-owned, which the shims only read;
+  `CARGO_HOME` is left unset so it falls back to `$HOME/.cargo`, writable by the unprivileged
+  runtime user and mountable with `rw = ["~/.cargo"]` to keep the registry across boxes.
+
 - `--claude-binary PATH` (config key `claude_binary`) mounts that `claude` build instead of the
   first one on `PATH`, which pins a session to a particular version rather than to whatever `PATH`
   reaches first. It must be an executable file, checked before the box starts, because `docker`
