@@ -12,15 +12,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - A Rust toolchain in the image: rustup stable with the `wasm32-unknown-unknown` target, plus
-  `cargo-run-bin` for the `cargo bin` subcommand. Debian's own `rustc` is not used because bookworm
-  ships 1.63 and a crate declaring `edition = "2024"` needs 1.85 or newer, so `apt install rustc`
-  yields a toolchain that cannot parse the manifest at all. `cargo bin` is installed alongside it
+  `cargo-run-bin` for the `cargo bin` subcommand. Debian's own `rustc` is not used because a stable
+  release only ever falls behind what crates ask for, and an edition newer than the one it knows
+  leaves it unable to parse the manifest at all. `cargo bin` is installed alongside it
   because projects pinning their build tools through `[package.metadata.bin]` (wasm-bindgen-cli,
   wasm-opt) invoke it from their own build scripts, and a toolchain without it still fails at the
   first step. `RUSTUP_HOME` is baked into `/opt` and left root-owned, which the shims only read;
   `CARGO_HOME` is left unset so it falls back to `$HOME/.cargo`, writable by the unprivileged
   runtime user and mountable with `rw = ["~/.cargo"]` to keep the registry across boxes.
-
 - `--claude-binary PATH` (config key `claude_binary`) mounts that `claude` build instead of the
   first one on `PATH`, which pins a session to a particular version rather than to whatever `PATH`
   reaches first. It must be an executable file, checked before the box starts, because `docker`
@@ -36,6 +35,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   flags still cannot work anywhere but Linux, and the packaging metadata still declares Linux only:
   this is an escape hatch, not support. Only `1`, `on`, `true`, or `yes` lift the guard, so a stray
   `=0` does not silently disable it.
+
+### Changed
+
+- The image is built on Debian 13 (trixie) rather than Debian 12 (bookworm). PyGObject 3.52 and
+  newer build against `girepository-2.0`, which exists only in GLib 2.80 and above, and bookworm is
+  on GLib 2.74 with no such package available at all. Any project whose lock file reaches PyGObject
+  therefore could not have its environment created inside a box, which in practice meant every
+  project depending on `pygobject-stubs` or `pydbus-stubs`, since those pull in the compiled
+  library and PyPI publishes PyGObject as a source distribution only. `libgirepository1.0-dev` is
+  replaced by `libgirepository-2.0-dev` accordingly, and `gir1.2-glib-2.0` is added alongside it:
+  the headers are what PyGObject compiles against, while `gi.repository` resolves a namespace at
+  run time through the typelib describing it, so without them `import gi` succeeds and
+  `from gi.repository import GLib` still does not.
+
+  Debian's 64-bit `time_t` transition renames the runtime libraries that came with it, so
+  `libasound2`, `libatk1.0-0`, `libatk-bridge2.0-0`, `libatspi2.0-0`, and `libmpg123-0` are now
+  installed under their `t64` names, and the Adoptium suite moves to `trixie` along with the base.
+  The system interpreter moves from 3.11 to 3.13; the wheels the image installs into `/opt/venv`
+  are stable-ABI or pure Python, so the pins are unaffected.
 
 ## [0.1.0] - 2026-08-26
 

@@ -2,7 +2,7 @@
 # and no permission prompts against host-mounted paths.
 # The `claude` executable is NOT installed here. It is bind-mounted from the host at run time.
 # Base must be glibc (the binary needs GLIBC_2.17+). Alpine/musl will not work.
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 LABEL org.opencontainers.image.description="Throwaway Claude Code container (no sandbox, no prompts)." \
       org.opencontainers.image.licenses="MIT" \
@@ -32,17 +32,18 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
           ninja-build \
         build-essential \
         gh \
+        gir1.2-glib-2.0 \
         git \
         gnupg \
         gosu \
         jq \
         less \
-        libatk-bridge2.0-0 \
-        libatk1.0-0 \
-        libatspi2.0-0 \
+        libatk-bridge2.0-0t64 \
+        libatk1.0-0t64 \
+        libatspi2.0-0t64 \
         libcairo2-dev \
         libffi-dev \
-        libgirepository1.0-dev \
+        libgirepository-2.0-dev \
         locales \
         nodejs \
         openssh-client \
@@ -83,7 +84,7 @@ RUN git clone https://github.com/softcane/cc-session-recover.git /opt/cc-session
 # Reverse-engineering tools.
 RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
         -o /etc/apt/keyrings/adoptium.asc \
-    && echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb bookworm main" \
+    && echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb trixie main" \
         > /etc/apt/sources.list.d/adoptium.list \
     && apt-get update && apt-get install -y --no-install-recommends \
         temurin-21-jdk \
@@ -92,11 +93,11 @@ RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
         openssl unzip xz-utils p7zip-full \
         usbutils \
         ffmpeg sox libsox-fmt-all flac vorbis-tools opus-tools lame mpg123 wavpack shntool \
-        libao4 libmpg123-0 libvorbis0a libvorbisfile3 libspeex1 \
+        libao4 libmpg123-0t64 libvorbis0a libvorbisfile3 libspeex1 \
         imagemagick zbar-tools \
         x11-utils x11-xserver-utils xauth \
         libgl1 libgl1-mesa-dri libglu1-mesa \
-        libpulse0 libasound2 libnss3 \
+        libpulse0 libasound2t64 libnss3 \
         libx11-6 libxcb1 libxcursor1 libxrandr2 libxi6 libxtst6 libxrender1 \
         libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxss1 \
         libfontconfig1 libfreetype6 fonts-dejavu-core \
@@ -149,8 +150,8 @@ RUN git clone --depth 1 https://github.com/Tatsh/pngdefry /tmp/pngdefry \
     && cc -O2 -o /usr/local/bin/pngdefry /tmp/pngdefry/source/pngdefry.c \
     && rm -rf /tmp/pngdefry
 # Rust, for repositories whose build compiles to WebAssembly (noclip.website and the like).
-# rustup rather than Debian's rustc: bookworm ships 1.63, and a crate declaring `edition = "2024"`
-# needs 1.85 or newer, so `apt install rustc` produces a toolchain that cannot parse the manifest.
+# rustup rather than Debian's rustc: a stable release only ever moves backwards from what crates
+# ask for, and an edition newer than the one it knows leaves it unable to parse the manifest at all.
 # `cargo-run-bin` supplies the `cargo bin` subcommand that such projects invoke to fetch pinned
 # build tools (wasm-bindgen-cli, wasm-opt) named in `[package.metadata.bin]`; without it a
 # toolchain alone still fails at the first build step. It is installed with `--root /usr/local` so

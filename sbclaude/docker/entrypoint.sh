@@ -222,9 +222,8 @@ if [ -n "${SBCLAUDE_VENV:-}" ] && [ "${SBCLAUDE_SETUP_VENV:-1}" = "1" ]; then
                 #
                 # A single dependency that cannot build here fails the whole sync, which would
                 # leave the box with no test runner and no linter over one package it was never
-                # going to use. Some cannot build at any price: pygobject 3.56 wants
-                # girepository-2.0, which wants a glib newer than the base image carries, so no
-                # amount of -dev packages will satisfy it.
+                # going to use. The image carries the headers for the ones met so far, but a
+                # project is free to depend on something built against a library that is not here.
                 #
                 # uv names the culprit in its hint line, so read it back, exclude that one package
                 # and try again. Each pass excludes one more, which converges because the set of

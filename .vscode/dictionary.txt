@@ -66,10 +66,8 @@ functools
 fxaa
 genindex
 getgid
-getpass
 getpwuid
 getuid
-getuser
 ghidra
 ghidra's
 girepository
@@ -184,6 +182,7 @@ privs
 proc
 pycache
 pydantic
+pydbus
 pydocstyle
 pygobject
 pyinstaller
@@ -243,6 +242,7 @@ tomlq
 tostring
 trustdb
 tryfirst
+typelib
 ubyte
 udvare
 undraft
