@@ -1,3 +1,12 @@
 #!/usr/bin/env bash
 # Convenience launcher for the Ghidra GUI (needs X11 — run the box with --x11).
-exec bash /usr/share/ghidra/ghidraRun "$@"
+set -u
+target=${GHIDRA_INSTALL_DIR:-/usr/share/ghidra}/ghidraRun
+if [ ! -r "$target" ]; then
+    echo "ghidraRun: Ghidra is not available in this container." >&2
+    echo "  expected: $target" >&2
+    echo "  Ghidra is bind-mounted from the host, not installed in the image." >&2
+    echo "  Start the box with --ghidra (or --re) plus --x11." >&2
+    exit 127
+fi
+exec bash "$target" "$@"

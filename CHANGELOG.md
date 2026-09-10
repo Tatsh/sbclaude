@@ -55,6 +55,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The system interpreter moves from 3.11 to 3.13; the wheels the image installs into `/opt/venv`
   are stable-ABI or pure Python, so the pins are unaffected.
 
+- A missing Ghidra installation is reported instead of passed through. `--ghidra` or `--re` on a
+  host with no `/usr/share/ghidra` logs a warning naming the absent path rather than quietly
+  dropping the mount, and the in-container `analyzeHeadless` and `ghidraRun` launchers check that
+  their target is readable first, explaining that Ghidra is bind-mounted from the host rather than
+  installed in the image and exiting 127, instead of handing `bash` a path that is not there.
+  Both launchers also honour `GHIDRA_INSTALL_DIR` rather than assuming `/usr/share/ghidra`.
+
 ### Fixed
 
 - `apktool`, `analyzeHeadless`, and `ghidraRun` could fail to run at all with a bare

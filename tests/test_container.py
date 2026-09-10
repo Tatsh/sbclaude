@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 import json
+import logging
 import os
 import subprocess as sp
 import tempfile
@@ -682,15 +683,20 @@ def test_build_run_argv_ghidra(mocker: MockerFixture, tmp_path: Path) -> None:
     assert f'{ghidra}:{ghidra}:ro' in argv
 
 
-def test_build_run_argv_ghidra_absent(mocker: MockerFixture, tmp_path: Path) -> None:
+def test_build_run_argv_ghidra_absent(mocker: MockerFixture, tmp_path: Path,
+                                      caplog: pytest.LogCaptureFixture) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
-    mocker.patch('sbclaude.container.GHIDRA_DIR', tmp_path / 'absent-ghidra')
+    ghidra = tmp_path / 'absent-ghidra'
+    mocker.patch('sbclaude.container.GHIDRA_DIR', ghidra)
     project = tmp_path / 'p'
     project.mkdir()
-    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n',
-                                                         use_ghidra=True))
+    with caplog.at_level(logging.WARNING, logger='sbclaude.container'):
+        argv, _ = container.build_run_argv(
+            container.RunSpec(project=project, name='n', use_ghidra=True))
     assert not any('absent-ghidra' in arg for arg in argv)
+    assert any(record.levelno == logging.WARNING and str(ghidra) in record.getMessage()
+               for record in caplog.records)
 
 
 def test_build_run_argv_usb(mocker: MockerFixture, tmp_path: Path) -> None:

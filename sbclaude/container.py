@@ -599,8 +599,15 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         for tool in PENTOO_TOOL_DIRS:
             if tool.is_dir():
                 argv += _v(tool, ro=True)
-    if spec.use_ghidra and GHIDRA_DIR.is_dir():
-        argv += _v(GHIDRA_DIR, ro=True)
+    if spec.use_ghidra:
+        if GHIDRA_DIR.is_dir():
+            argv += _v(GHIDRA_DIR, ro=True)
+        else:
+            # Silently skipping leaves analyzeHeadless failing inside the container with a
+            # message about a path the user never chose; say it here, where the cause is known.
+            log.warning(
+                'Ghidra requested but %s is not present on the host; '
+                'analyzeHeadless and ghidraRun will not work.', GHIDRA_DIR)
     # Optional feature mounts, as (enabled, build-args) pairs. A table rather than a run of `if`
     # statements: each entry is independent, so adding one should not grow the function's
     # branching. Order is preserved and matters only for readability of the final argv.

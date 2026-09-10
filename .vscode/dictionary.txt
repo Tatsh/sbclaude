@@ -19,6 +19,7 @@ binutils
 bsdmainutils
 bsky
 buildargs
+caplog
 capsys
 cdrommsf
 chowning
