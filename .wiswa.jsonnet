@@ -5,8 +5,8 @@ local utils = import 'utils.libjsonnet';
   description: 'Run Claude Code in a throwaway Docker container.',
   keywords: ['android', 'claude', 'docker', 'ghidra', 'reverse engineering', 'sandbox'],
   project_name: 'sbclaude',
-  security_policy_supported_versions: { '0.1.x': ':white_check_mark:' },
-  version: '0.1.0',
+  security_policy_supported_versions: { '0.2.x': ':white_check_mark:' },
+  version: '0.2.0',
   // The host's claude binary is bind-mounted into a Linux container and run there, so the host
   // must supply an ELF one; every device and socket the run flags pass through is a Linux path;
   // and neither os.getuid nor syslog exists on Windows.

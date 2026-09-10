@@ -9,54 +9,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
 
+## [0.2.0] - 2026-09-10
+
 ### Added
 
 - A Rust toolchain in the image: rustup stable with the `wasm32-unknown-unknown` target, plus
   `cargo-run-bin` for the `cargo bin` subcommand. Debian's own `rustc` is not used because a stable
-  release only ever falls behind what crates ask for, and an edition newer than the one it knows
-  leaves it unable to parse the manifest at all. `cargo bin` is installed alongside it
-  because projects pinning their build tools through `[package.metadata.bin]` (wasm-bindgen-cli,
-  wasm-opt) invoke it from their own build scripts, and a toolchain without it still fails at the
-  first step. `RUSTUP_HOME` is baked into `/opt` and left root-owned, which the shims only read;
-  `CARGO_HOME` is left unset so it falls back to `$HOME/.cargo`, writable by the unprivileged
-  runtime user and mountable with `rw = ["~/.cargo"]` to keep the registry across boxes.
+  release only ever falls behind what crates require, and an edition newer than the one it knows
+  makes it unable to parse the manifest at all. `cargo bin` is installed alongside it because
+  projects pinning their build tools through `[package.metadata.bin]` (wasm-bindgen-cli, wasm-opt)
+  invoke it from their build scripts, and a toolchain without it still fails at the first step.
+  `RUSTUP_HOME` is baked into `/opt` and remains root-owned, and the shims only read it.
+  `CARGO_HOME` is unset and therefore falls back to `$HOME/.cargo`, writable by the unprivileged
+  runtime user and mountable with `rw = ["~/.cargo"]` to preserve the registry across boxes.
 - `--claude-binary PATH` (config key `claude_binary`) mounts that `claude` build instead of the
-  first one on `PATH`, which pins a session to a particular version rather than to whatever `PATH`
-  reaches first. It must be an executable file, checked before the box starts, because `docker`
-  would otherwise bind-mount a missing path as an empty directory and fail much later with nothing
-  pointing back at the setting. Alone among the config keys it is read from the global file only,
-  and a project's `pyproject.toml` cannot set it: it names what the box executes as claude, with
-  `~/.claude` mounted, so a cloned repository choosing it would be arbitrary code execution on
-  behalf of whoever cloned it.
+  first one on `PATH`. The flag pins a session to a particular version rather than to whatever
+  appears first on `PATH`. It must be an executable file, checked before the box starts, because
+  `docker` would otherwise bind-mount a missing path as an empty directory and fail much later with
+  nothing pointing back at the setting. Alone among the config keys it is read from the global file
+  only, and a project's `pyproject.toml` cannot set it. The key specifies what the box executes as
+  claude, with `~/.claude` mounted. A cloned repository choosing it would therefore be arbitrary
+  code execution on behalf of whoever cloned it.
 - `SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM=1` turns the non-Linux refusal into a warning, for a host
   you are willing to arrange by hand. Nothing in a plain `sbclaude run` is Linux-only except the
-  binary, so a macOS session may work given an ELF `claude` for the container's architecture, every
-  mounted path on a filesystem Docker Desktop shares into its VM, and a shared `TMPDIR`. The device
-  flags still cannot work anywhere but Linux, and the packaging metadata still declares Linux only:
-  this is an escape hatch, not support. Only `1`, `on`, `true`, or `yes` lift the guard, so a stray
-  `=0` does not silently disable it.
+  binary. A macOS session may therefore work given an ELF `claude` for the container's
+  architecture, every mounted path on a filesystem Docker Desktop shares into its VM, and a shared
+  `TMPDIR`. The device flags still cannot work anywhere but Linux, and the packaging metadata still
+  declares Linux only. The variable is an escape hatch, not support. Only `1`, `on`, `true`, or
+  `yes` lift the guard. A stray `=0` therefore does not silently disable the guard.
 
 ### Changed
 
 - The image is built on Debian 13 (trixie) rather than Debian 12 (bookworm). PyGObject 3.52 and
-  newer build against `girepository-2.0`, which exists only in GLib 2.80 and above, and bookworm is
-  on GLib 2.74 with no such package available at all. Any project whose lock file reaches PyGObject
-  therefore could not have its environment created inside a box, which in practice meant every
-  project depending on `pygobject-stubs` or `pydbus-stubs`, since those pull in the compiled
-  library and PyPI publishes PyGObject as a source distribution only. `libgirepository1.0-dev` is
-  replaced by `libgirepository-2.0-dev` accordingly, and `gir1.2-glib-2.0` is added alongside it:
-  the headers are what PyGObject compiles against, while `gi.repository` resolves a namespace at
-  run time through the typelib describing it, so without them `import gi` succeeds and
+  newer build against `girepository-2.0`, present only in GLib 2.80 and above, and bookworm is on
+  GLib 2.74 with no such package available at all. Any project whose lock file includes PyGObject
+  therefore could not have its environment created inside a box. In practice every project
+  depending on `pygobject-stubs` or `pydbus-stubs` was affected; the stubs pull in the compiled
+  library, and PyPI publishes PyGObject as a source distribution only. `libgirepository1.0-dev` is
+  replaced by `libgirepository-2.0-dev` accordingly, and `gir1.2-glib-2.0` is added alongside it.
+  The headers are what PyGObject compiles against, while `gi.repository` resolves a namespace at
+  run time through the typelib describing it. Without both, `import gi` succeeds and
   `from gi.repository import GLib` still does not.
 
-  Debian's 64-bit `time_t` transition renames the runtime libraries that came with it, so
-  `libasound2`, `libatk1.0-0`, `libatk-bridge2.0-0`, `libatspi2.0-0`, and `libmpg123-0` are now
-  installed under their `t64` names, and the Adoptium suite moves to `trixie` along with the base.
-  The system interpreter moves from 3.11 to 3.13; the wheels the image installs into `/opt/venv`
-  are stable-ABI or pure Python, so the pins are unaffected.
+  Debian's 64-bit `time_t` transition renames the runtime libraries that came with it.
+  `libasound2`, `libatk1.0-0`, `libatk-bridge2.0-0`, `libatspi2.0-0`, and `libmpg123-0` are
+  therefore installed under their `t64` names, and the Adoptium suite moves to `trixie` along with
+  the base. The system interpreter moves from 3.11 to 3.13; the wheels the image installs into
+  `/opt/venv` are stable-ABI or pure Python. The pins are therefore unaffected.
 
 - A missing Ghidra installation is reported instead of passed through. `--ghidra` or `--re` on a
-  host with no `/usr/share/ghidra` logs a warning naming the absent path rather than quietly
+  host with no `/usr/share/ghidra` logs a warning identifying the absent path rather than quietly
   dropping the mount, and the in-container `analyzeHeadless` and `ghidraRun` launchers check that
   their target is readable first, explaining that Ghidra is bind-mounted from the host rather than
   installed in the image and exiting 127, instead of handing `bash` a path that is not there.
@@ -66,10 +68,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `apktool`, `analyzeHeadless`, and `ghidraRun` could fail to run at all with a bare
   `Permission denied`. `COPY` preserves the build context's file mode, and the image then ran
-  `chmod +x`, which only adds execute bits, so a launcher checked out `750` landed as `751`:
-  executable by the container user but not readable by it, and a shell script has to be read by its
-  interpreter rather than exec'd by the kernel. The three launchers are now set to `755` outright,
-  so the host umask and checkout mode no longer decide whether they work.
+  `chmod +x`, a command that only adds execute bits. A launcher checked out `750` therefore landed
+  as `751`, executable by the container user but not readable by it, and a shell script has to be
+  read by its interpreter rather than exec'd by the kernel. The three launchers are now set to
+  `755` outright. The host umask and checkout mode therefore no longer decide whether they work.
 
 ## [0.1.0] - 2026-08-26
 
@@ -178,6 +180,7 @@ permission prompts disabled, against a configurable set of host bind mounts.
 See the README for the full feature set: RE toolchain, session recovery, MCP support, SSH and GPG
 passthrough, and per-project configuration.
 
-[unreleased]: https://github.com/Tatsh/sbclaude/compare/v0.1.0...HEAD
+[unreleased]: https://github.com/Tatsh/sbclaude/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Tatsh/sbclaude/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Tatsh/sbclaude/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/Tatsh/sbclaude/releases/tag/v0.0.1
