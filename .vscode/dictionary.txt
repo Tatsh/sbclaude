@@ -2,7 +2,6 @@ adoptium
 alsa
 analyzer
 anchore
-Ångström
 apktool
 appdir
 appimage
@@ -158,12 +157,14 @@ nodesource
 nodistro
 nonexistent
 noninteractive
+noone
 nopasswd
 noqa
 norecursedirs
 nosystem
 nullglob
 numpy
+numpydoc
 nvidiactl
 nvml
 oneline
@@ -178,6 +179,7 @@ pipx
 platformdirs
 plistlib
 pngdefry
+popen
 preapproved
 privs
 proc
@@ -278,3 +280,4 @@ yapfignore
 yarnrc
 zbar
 zizmor
+Ångström

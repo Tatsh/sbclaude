@@ -51,7 +51,7 @@ def test_transient_uv_project_environment_is_outside_the_project() -> None:
     value = container.transient_uv_project_environment(project)
     assert Path(value).is_absolute()
     assert not value.startswith(str(project))
-    assert value.startswith('/tmp/sbclaude-venv-My-Proj-')  # noqa: S108
+    assert value.startswith('/tmp/sbclaude-venv-My-Proj-')  # ruff: ignore[hardcoded-temp-file]
 
 
 def test_uv_project_environment_in_is_under_the_given_directory() -> None:

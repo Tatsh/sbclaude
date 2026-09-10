@@ -113,5 +113,5 @@ def test_scaffold_runner_is_not_game_specific(tmp_path: Path) -> None:
 def test_scaffold_defaults_to_the_current_directory(tmp_path: Path,
                                                     monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    scaffold(Path(os.getcwd()))  # noqa: PTH109
+    scaffold(Path(os.getcwd()))  # ruff: ignore[os-getcwd]
     assert (tmp_path / 'viewer-tests' / 'nc.mjs').is_file()

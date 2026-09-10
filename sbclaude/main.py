@@ -46,7 +46,7 @@ def main(ctx: click.Context) -> None:
     The host must be Linux, unless SBCLAUDE_ALLOW_UNSUPPORTED_PLATFORM is set.
 
     With no subcommand, behaves like `sbclaude run` using config defaults.
-    """  # noqa: DOC501
+    """  # ruff: ignore[docstring-missing-exception]
     if sys.platform != 'linux':
         # An allow-list rather than mere presence: a guard that `=0` switches off is worse than no
         # guard, because it reads as though it is still on.
@@ -175,7 +175,8 @@ def run(
     session_recover: bool,
     debug: bool,
 ) -> None:
-    """Launch claude in a fresh container. Args after ``--`` pass through to claude."""  # noqa: DOC501
+    # ruff: ignore[docstring-missing-exception]
+    """Launch claude in a fresh container. Args after ``--`` pass through to claude."""
     setup_logging(debug=debug, loggers={'sbclaude': {}})
     proj = (project or Path.cwd()).resolve()
     cfg = load_config(project=proj)
@@ -346,7 +347,8 @@ def stop(name: str | None, *, all_: bool) -> None:
               is_flag=True,
               help='Open the shell as root instead of the mapped user.')
 def shell(name: str | None, *, as_root: bool) -> None:
-    """Open a debug shell inside a running box, as the user the box mirrors."""  # noqa: DOC501
+    # ruff: ignore[docstring-missing-exception]
+    """Open a debug shell inside a running box, as the user the box mirrors."""
     target = name
     if target is None:
         names = container.project_containers(Path.cwd().resolve())
@@ -366,7 +368,8 @@ def shell(name: str | None, *, as_root: bool) -> None:
               help='Debian archive mirror to bake into the image, e.g. '
               'http://ftp.us.debian.org/debian.')
 def build(debian_mirror: str | None, *, no_cache: bool) -> None:
-    """Build the sbclaude Docker image from the packaged Dockerfile."""  # noqa: DOC501
+    # ruff: ignore[docstring-missing-exception]
+    """Build the sbclaude Docker image from the packaged Dockerfile."""
     mirror = debian_mirror or load_config().debian_mirror
     try:
         for line in container.build_images(no_cache=no_cache, debian_mirror=mirror):
@@ -401,7 +404,7 @@ def scaffold_noclip(target: Path | None, scene: str | None, *, force: bool) -> N
     Writes viewer-tests/ (glue, config, baselines/, out/) plus a getting-started guide. The
     ``webshot`` tool it drives is already installed in the box. Other harnesses, if they are ever
     added, get their own ``scaffold-<kind>`` command rather than a flag on this one.
-    """  # noqa: DOC501
+    """  # ruff: ignore[docstring-missing-exception]
     target = target or Path.cwd()
     try:
         result = scaffold(target, 'noclip', scene=scene, force=force)

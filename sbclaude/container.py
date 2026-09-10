@@ -315,7 +315,7 @@ def transient_uv_project_environment(project: Path) -> str:
     str
         The absolute path of the box's virtualenv, inside the container.
     """
-    return uv_project_environment_in('/tmp', project)  # noqa: S108
+    return uv_project_environment_in('/tmp', project)  # ruff: ignore[hardcoded-temp-file]
 
 
 def _host_venv_args(project: Path) -> list[str]:
@@ -780,11 +780,11 @@ def _ssh_args(home: Path) -> list[str]:
 
 def _gpg_agent_socket() -> Path | None:
     try:
-        out = sp.run(
-            ['gpgconf', '--list-dirs', 'agent-socket'],  # noqa: S607
-            check=True,
-            capture_output=True,
-            text=True).stdout.strip()
+        # ruff: ignore[start-process-with-partial-path]
+        out = sp.run(['gpgconf', '--list-dirs', 'agent-socket'],
+                     check=True,
+                     capture_output=True,
+                     text=True).stdout.strip()
     except (FileNotFoundError, sp.CalledProcessError):
         return None
     return Path(out) if out else None
@@ -829,12 +829,12 @@ def _global_gitconfig_files(home: Path) -> Iterator[Path]:
     # the include paths resolve the same way they will inside the box.
     env = {**os.environ, 'HOME': str(home), 'GIT_CONFIG_NOSYSTEM': '1'}
     try:
-        out = sp.run(
-            ['git', 'config', '--global', '--list', '--show-origin', '--includes'],  # noqa: S607
-            capture_output=True,
-            check=True,
-            env=env,
-            text=True).stdout
+        # ruff: ignore[start-process-with-partial-path]
+        out = sp.run(['git', 'config', '--global', '--list', '--show-origin', '--includes'],
+                     capture_output=True,
+                     check=True,
+                     env=env,
+                     text=True).stdout
     except (FileNotFoundError, sp.CalledProcessError):
         return
     seen: set[Path] = set()
@@ -903,7 +903,7 @@ def _x11_args(uid: int, user: str) -> list[str]:
     if not xauth and (home / '.Xauthority').is_file():
         xauth = str(home / '.Xauthority')
     args = ['-e', f'DISPLAY={os.environ.get("DISPLAY", ":0")}',
-            *_v('/tmp/.X11-unix', ro=True)]  # noqa: S108
+            *_v('/tmp/.X11-unix', ro=True)]  # ruff: ignore[hardcoded-temp-file]
     if xauth and Path(xauth).is_file():
         args += [*_v(xauth, ro=True), '-e', f'XAUTHORITY={xauth}']
     else:
@@ -1001,7 +1001,7 @@ def run(spec: RunSpec) -> int:
     if image == IMAGE_BASE:
         ensure_image(
             image,
-            log=lambda line: print(line, file=sys.stderr),  # noqa: T201
+            log=lambda line: print(line, file=sys.stderr),  # ruff: ignore[print]
             debian_mirror=spec.debian_mirror)
     code = 0
     for attempt in range(1, _LAUNCH_ATTEMPTS + 1):
@@ -1077,9 +1077,8 @@ def shell(name: str, *, root: bool = False) -> int:
     identity = [] if root else _shell_identity_args(name)
     # A login shell so that /etc/profile.d/sbclaude.sh runs and the toolchain (the JDK, the
     # Android SDK, /opt/venv) is on PATH exactly as it is for the session's own shells.
-    return sp.run(
-        ['docker', 'exec', '-it', *identity, name, 'bash', '-l'],  # noqa: S607
-        check=False).returncode
+    # ruff: ignore[start-process-with-partial-path]
+    return sp.run(['docker', 'exec', '-it', *identity, name, 'bash', '-l'], check=False).returncode
 
 
 def _client() -> docker.DockerClient:
