@@ -202,7 +202,12 @@ RUN set -eux; \
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 # Launchers for the host-mounted tools (jars/scripts arrive via bind mounts at run time).
 COPY bin/apktool bin/analyzeHeadless bin/ghidraRun /usr/local/bin/
-RUN chmod +x /usr/local/bin/apktool /usr/local/bin/analyzeHeadless /usr/local/bin/ghidraRun
+# 755, not +x. COPY preserves the build context's mode, and `chmod +x` only adds the
+# execute bit, so a source file checked out 750 lands as 751: executable by the
+# container user but not readable by it. That is fatal for a shell script, because
+# the interpreter — not the kernel — has to open it, so it fails with a bare
+# 'Permission denied' that looks nothing like a permissions problem.
+RUN chmod 755 /usr/local/bin/apktool /usr/local/bin/analyzeHeadless /usr/local/bin/ghidraRun
 # Export the toolchain for login shells (which re-read /etc/profile and would otherwise
 # reset PATH), so tools resolve no matter how a shell is spawned.
 RUN printf '%s\n' \

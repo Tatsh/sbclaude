@@ -55,6 +55,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The system interpreter moves from 3.11 to 3.13; the wheels the image installs into `/opt/venv`
   are stable-ABI or pure Python, so the pins are unaffected.
 
+### Fixed
+
+- `apktool`, `analyzeHeadless`, and `ghidraRun` could fail to run at all with a bare
+  `Permission denied`. `COPY` preserves the build context's file mode, and the image then ran
+  `chmod +x`, which only adds execute bits, so a launcher checked out `750` landed as `751`:
+  executable by the container user but not readable by it, and a shell script has to be read by its
+  interpreter rather than exec'd by the kernel. The three launchers are now set to `755` outright,
+  so the host umask and checkout mode no longer decide whether they work.
+
 ## [0.1.0] - 2026-08-26
 
 ### Added
