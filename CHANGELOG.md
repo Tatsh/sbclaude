@@ -9,6 +9,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
 
+### Added
+
+- `--keyring-keys` (config key `keyring_keys`) copies only the specified host secrets into the box
+  as environment variables. Each entry is written `NAME=SERVICE`, where NAME becomes the variable
+  and SERVICE is the keyring `service` attribute the secret is stored under.
+  `GH_TOKEN=gh:github.com` therefore presents the stored `gh` token as `GH_TOKEN`, and
+  `GITLAB_TOKEN=glab:gitlab.com` does the same for `glab`. Reading uses `secret-tool`, from
+  libsecret, on the host. The CLI form is comma-separated and merges with the configured list. The
+  value is passed to Docker by variable name rather than by value. It therefore does not land in the
+  argv of a process other users on the host can list, though `docker inspect` reports it as it does
+  every environment variable. An entry that does not parse, a missing `secret-tool`, and a lookup
+  that finds nothing are each reported and skipped rather than failing the run. Prefer this over
+  `--keyring` wherever an environment variable will do. It grants only the listed secrets rather
+  than every secret on the bus.
+- `--keyring` (config key `keyring`) forwards the D-Bus session bus so the box can query the host
+  Secret Service, re-homed under the container's own `XDG_RUNTIME_DIR`. It is intended for an
+  application that cannot take its secret from an environment variable and insists on the Secret
+  Service itself, such as recent `gh`. That client stores nothing in a file and reports no token at
+  all without the bus. The grant is wider than the other forwarded sockets. The session bus exposes
+  every entry in the login keyring rather than one secret, along with the other services on that
+  bus.
+
 ## [0.2.0] - 2026-09-10
 
 ### Added

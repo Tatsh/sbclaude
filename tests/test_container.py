@@ -1131,6 +1131,120 @@ def test_build_run_argv_wayland(mocker: MockerFixture, tmp_path: Path) -> None:
     assert f'{runtime / "wayland-1"}:/run/user/1234/wayland-1' in argv
 
 
+def test_build_run_argv_keyring(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    runtime = tmp_path / 'run'
+    runtime.mkdir()
+    # Empty rather than absent, so the runtime directory is used whatever the host exports.
+    mocker.patch.dict(os.environ, {'XDG_RUNTIME_DIR': str(runtime), 'DBUS_SESSION_BUS_ADDRESS': ''})
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_keyring=True))
+    assert 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1234/bus' in argv
+    assert 'XDG_RUNTIME_DIR=/run/user/1234' in argv
+    # Read-write: a bus client writes to the socket.
+    assert f'{runtime / "bus"}:/run/user/1234/bus' in argv
+
+
+def _secret_tool_calls(run: MagicMock) -> list[tuple[str, ...]]:
+    # sp.run serves several things in build_run_argv, so the lookups are picked out by their verb.
+    # The executable is the path which() resolved rather than the bare name.
+    return [call[0][0] for call in run.call_args_list if call[0] and 'lookup' in call[0][0]]
+
+
+def test_build_run_argv_keyring_keys(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/x')
+    run = mocker.patch('sbclaude.container.sp.run')
+    run.return_value.returncode = 0
+    run.return_value.stdout = 'tok'
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', keyring_keys=['GH_TOKEN=gh:github.com']))
+    assert _secret_tool_calls(run) == [('/usr/bin/x', 'lookup', 'service', 'gh:github.com')]
+    # The name alone: a value here would put the secret in an argv any user can list.
+    assert 'GH_TOKEN' in argv
+    assert not any('GH_TOKEN=' in arg for arg in argv)
+    assert os.environ['GH_TOKEN'] == 'tok'
+
+
+def test_build_run_argv_keyring_keys_no_secret_tool(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    # which also locates claude, so only secret-tool is made absent.
+    mocker.patch('sbclaude.container.which',
+                 side_effect=lambda name: None if name == 'secret-tool' else '/usr/bin/x')
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', keyring_keys=['GH_TOKEN=gh:github.com']))
+    assert 'GH_TOKEN' not in argv
+
+
+def test_build_run_argv_keyring_keys_malformed(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/x')
+    run = mocker.patch('sbclaude.container.sp.run')
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', keyring_keys=['no-equals-sign']))
+    assert 'no-equals-sign' not in argv
+    assert not _secret_tool_calls(run)
+
+
+def test_build_run_argv_keyring_keys_lookup_fails(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/x')
+    run = mocker.patch('sbclaude.container.sp.run')
+    run.return_value.returncode = 1
+    run.return_value.stdout = ''
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', keyring_keys=['ABSENT=nothing:here']))
+    assert 'ABSENT' not in argv
+
+
+def test_build_run_argv_keyring_address_path(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    sock = tmp_path / 'elsewhere' / 'session-bus'
+    sock.parent.mkdir()
+    mocker.patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': f'unix:path={sock},guid=abc'})
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_keyring=True))
+    # The address wins over the runtime directory, and the guid after the comma is not part of it.
+    assert f'{sock}:/run/user/1234/bus' in argv
+
+
+def test_build_run_argv_keyring_no_socket(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch.dict(os.environ, {
+        'XDG_RUNTIME_DIR': str(tmp_path / 'absent'),
+        'DBUS_SESSION_BUS_ADDRESS': ''
+    })
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_keyring=True))
+    assert not any('DBUS_SESSION_BUS_ADDRESS' in arg for arg in argv)
+
+
 def test_build_run_argv_wayland_absolute_display(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)

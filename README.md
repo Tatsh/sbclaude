@@ -186,6 +186,8 @@ more than one is running).
 | `--usb`             | expose `/dev/bus/usb` for adb over USB                                           |
 | `--ios`             | mount the host `usbmuxd` socket so frida reaches an iOS device over USB          |
 | `--gpu`             | expose the host GPUs (NVIDIA runtime plus the DRM render nodes)                  |
+| `--keyring`         | forward the D-Bus session bus to reach the host keyring (grants every secret)    |
+| `--keyring-keys`    | copy only the named host secrets in as environment variables                     |
 | `--wayland`         | forward the Wayland socket for GUI apps (preferred over `--x11`)                 |
 | `--x11`             | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator)   |
 | `--ssh`             | mount the host `~/.ssh` read-only and forward the ssh-agent, for SSH git remotes |
@@ -223,6 +225,7 @@ pin its own defaults. All keys optional:
 ```toml
 [tool.sbclaude]
 gpg = true       # mount the GnuPG home + agent for signing
+keyring = true   # forward the D-Bus session bus to reach the host keyring
 network = "host" # default; "bridge" to isolate the box's network
 re = true        # enable the Ghidra + Android mounts together
 ssh = true       # mount ~/.ssh read-only + forward the ssh-agent for SSH git remotes
@@ -238,6 +241,7 @@ x11 = true       # forward X11 for GUI apps
 # venv_dir = "/venv-cache"        # hold the box's virtualenv here (pair with a docker_args volume)
 # claude_binary = "~/bin/claude"  # mount this claude build rather than the first one on PATH
 # fullscreen = false              # do not force the fullscreen TUI (keeps start-up errors visible)
+keyring_keys = ["GH_TOKEN=gh:github.com"]          # copy only these host secrets in, as env vars
 pass_env = ["AWS_REGION"]                          # forward host vars (AWS_PROFILE is default)
 ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"] # read-only mounts (globs + ~ ok)
 rw = []                                            # the project dir is always rw automatically
@@ -246,9 +250,25 @@ rw = []                                            # the project dir is always r
 CLAUDE_CODE_USE_BEDROCK = "1"
 ```
 
-The toggle keys `re`, `ghidra`, `android`, `gpu`, `usb`, `ios`, `wayland`, `x11`, `ssh`, `gpg`,
-and `sudo` mirror the matching `run` flags and default to `false`; setting one is the same as
+The toggle keys `re`, `ghidra`, `android`, `gpu`, `usb`, `ios`, `keyring`, `wayland`, `x11`, `ssh`,
+`gpg`, and `sudo` mirror the matching `run` flags and default to `false`; setting one is the same as
 always passing that flag.
+
+### Secrets
+
+Prefer `keyring_keys` when the applications in the box take their secrets from environment
+variables. Each entry is `NAME=SERVICE`, where NAME is the variable and SERVICE is the keyring
+`service` attribute, so `GH_TOKEN=gh:github.com` presents the stored `gh` token as `GH_TOKEN` and
+`GITLAB_TOKEN=glab:gitlab.com` does the same for `glab`. Both CLIs store under their own name and a
+host, so a self-managed instance takes that host instead, as in `glab:gitlab.example.com`.
+Only the named secrets are read, and no bus is forwarded. Reading uses `secret-tool`, from
+libsecret, on the host. The value is passed by name rather than by value, so it does not appear in
+the argv of a process other users can list, though `docker inspect` shows it as it does every
+environment variable.
+
+Use `keyring = true` when an application cannot take its secret from the environment and insists on
+the Secret Service. That forwards the whole D-Bus session bus, which grants every entry in the
+login keyring rather than the ones you named, along with the other services on that bus.
 
 **Debian mirror** — when `deb.debian.org` is slow, point image builds at a faster archive
 mirror with `debian_mirror` (or `--debian-mirror` on `build`/`run`). Only the image's main

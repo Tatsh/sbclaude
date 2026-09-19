@@ -191,6 +191,34 @@ def test_run_ios_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
     assert run.call_args[0][0].use_ios
 
 
+def test_run_keyring_keys_flag(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--keyring-keys', 'A=one, B=two'])
+    assert run.call_args[0][0].keyring_keys == ['A=one', 'B=two']
+
+
+def test_run_keyring_keys_merge_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(keyring_keys=['A=one']))
+    runner.invoke(main, ['run', '--keyring-keys', 'B=two'])
+    assert run.call_args[0][0].keyring_keys == ['A=one', 'B=two']
+
+
+def test_run_keyring_flag(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run', '--keyring'])
+    assert run.call_args[0][0].use_keyring
+
+
+def test_run_keyring_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(keyring=True))
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].use_keyring
+
+
 def test_run_wayland_flag(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())

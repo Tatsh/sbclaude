@@ -213,6 +213,10 @@ class RunSpec:
     """Whether to expose the host NVIDIA GPU(s) via the NVIDIA Container Toolkit."""
     use_ios: bool = False
     """Whether to mount the host usbmuxd socket so frida can reach an iOS device."""
+    use_keyring: bool = False
+    """Whether to forward the D-Bus session bus so the box reaches the host Secret Service."""
+    keyring_keys: list[str] = field(default_factory=list)
+    """Named host secrets to copy in, each written ``NAME=SERVICE``."""
     use_re: bool = False
     """Whether to enable the reverse-engineering host mounts (Ghidra and Android together)."""
     use_ssh: bool = False
@@ -618,6 +622,8 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         (spec.use_ios, _ios_args),
         (spec.use_ssh, lambda: _ssh_args(home)),
         (spec.use_gpg, lambda: _gpg_args(home, uid)),
+        (spec.use_keyring, lambda: _keyring_args(uid)),
+        (bool(spec.keyring_keys), lambda: _keyring_secret_args(spec.keyring_keys)),
         (spec.use_wayland, lambda: _wayland_args(uid)),
         (spec.use_x11, lambda: _x11_args(uid, user)),
     )
@@ -857,6 +863,100 @@ def _gitconfig_args(home: Path) -> list[str]:
     if not args and (gitconfig := home / '.gitconfig').is_file():
         args += _v(gitconfig, ro=True)
     return args
+
+
+def _keyring_secret_args(keys: Sequence[str]) -> list[str]:
+    """
+    Copy named host secrets into the box as environment variables.
+
+    Each key is ``NAME=SERVICE``. NAME becomes the variable and SERVICE is the keyring ``service``
+    attribute, so ``GH_TOKEN=gh:github.com`` presents the ``gh`` token as ``GH_TOKEN``. A key that
+    does not parse, a missing ``secret-tool``, and a lookup that finds nothing are each reported and
+    skipped rather than failing the run.
+
+    The value reaches Docker through the process environment and ``-e NAME``, which Docker fills
+    from its own environment. Passing ``-e NAME=value`` instead would put the secret in the argv of
+    a process any user on the host can list. It is still visible in ``docker inspect``, which is
+    true of every environment variable.
+
+    Parameters
+    ----------
+    keys : Sequence[str]
+        The requested secrets, each written ``NAME=SERVICE``.
+
+    Returns
+    -------
+    list[str]
+        ``docker run`` arguments naming each variable that was resolved.
+    """
+    # The resolved path is reused for the call rather than the bare name, so the lookup cannot
+    # reach a different executable than the one this check found.
+    secret_tool = which('secret-tool')
+    if not secret_tool:
+        sys.stderr.write('sbclaude: --keyring-keys: secret-tool not found; install it from '
+                         'libsecret to use this. Skipping\n')
+        return []
+    args: list[str] = []
+    for key in keys:
+        name, _, service = key.partition('=')
+        if not name or not service:
+            sys.stderr.write(f'sbclaude: --keyring-keys: {key!r} is not NAME=SERVICE; skipping\n')
+            continue
+        lookup = sp.run((secret_tool, 'lookup', 'service', service),
+                        capture_output=True,
+                        text=True,
+                        check=False)
+        if lookup.returncode != 0 or not lookup.stdout:
+            sys.stderr.write(f'sbclaude: --keyring-keys: no secret for service {service!r}; '
+                             'skipping\n')
+            continue
+        # Verbatim: secret-tool adds no trailing newline, and stripping one would corrupt a secret
+        # that ends in a newline of its own.
+        os.environ[name] = lookup.stdout
+        args += ['-e', name]
+    return args
+
+
+def _keyring_args(uid: int) -> list[str]:
+    """
+    Forward the D-Bus session bus, which is what reaches the host Secret Service.
+
+    A credential helper that stores nothing in a file, such as recent ``gh``, expects the login
+    keyring over this bus. Without it the helper reports no token and there is nothing to fall back
+    on.
+
+    This is a wider grant than the other forwarded sockets. Wayland carries one compositor and the
+    gpg socket one agent, whereas the session bus carries every service on it: the whole keyring
+    rather than one secret, plus notifications, portals, and the user's systemd units. Pass a single
+    credential through ``env`` or ``pass_env`` where one credential is what the box needs.
+
+    Parameters
+    ----------
+    uid : int
+        Host user ID, used to locate the bus socket and to place it in the container.
+
+    Returns
+    -------
+    list[str]
+        ``docker run`` arguments, or an empty list when no session bus socket exists.
+    """
+    address = os.environ.get('DBUS_SESSION_BUS_ADDRESS', '')
+    runtime = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{uid}')
+    # The address is the authority when it is set and names a path, because a session may place the
+    # socket outside the runtime directory. Everything else falls back to the usual location.
+    sock = Path(
+        address.removeprefix('unix:path=').split(',')[0]) if 'unix:path=' in address else (runtime /
+                                                                                           'bus')
+    if not sock.is_socket():
+        sys.stderr.write(f'sbclaude: --keyring: no session bus socket at {sock}; skipping\n')
+        return []
+    # Re-homed under the container's own runtime directory, and read-write because a bus client
+    # writes to the socket.
+    target = f'/run/user/{uid}/bus'
+    return [
+        *_v(sock, target), '-e', f'DBUS_SESSION_BUS_ADDRESS=unix:path={target}', '-e',
+        f'XDG_RUNTIME_DIR=/run/user/{uid}'
+    ]
 
 
 def _wayland_args(uid: int) -> list[str]:

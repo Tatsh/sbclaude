@@ -36,6 +36,23 @@ UNSUPPORTED_PLATFORM_WARNING = (
 """Warning shown in place of the refusal when the check is bypassed."""
 
 
+def _split_keys(text: str) -> list[str]:
+    """
+    Split a comma-separated option value, discarding surrounding space and empty entries.
+
+    Parameters
+    ----------
+    text : str
+        The raw option value.
+
+    Returns
+    -------
+    list[str]
+        The entries.
+    """
+    return [entry.strip() for entry in text.split(',') if entry.strip()]
+
+
 @click.group(invoke_without_command=True, context_settings={'help_option_names': ('-h', '--help')})
 @click.version_option()
 @click.pass_context
@@ -92,6 +109,17 @@ def main(ctx: click.Context) -> None:
               'use_ios',
               is_flag=True,
               help='Mount the host usbmuxd socket so frida can reach an iOS device.')
+@click.option('--keyring',
+              'use_keyring',
+              is_flag=True,
+              help='Forward the D-Bus session bus to reach the host keyring. Grants every secret '
+              'on that bus, not one.')
+@click.option('--keyring-keys',
+              'keyring_keys',
+              default='',
+              help='Comma-separated NAME=SERVICE secrets to copy in as environment variables, '
+              'such as GH_TOKEN=gh:github.com or GITLAB_TOKEN=glab:gitlab.com. Grants only those, '
+              'and needs no --keyring.')
 @click.option('--wayland',
               'use_wayland',
               is_flag=True,
@@ -164,6 +192,8 @@ def run(
     use_android: bool,
     use_usb: bool,
     use_ios: bool,
+    use_keyring: bool,
+    keyring_keys: str,
     use_wayland: bool,
     use_x11: bool,
     use_ssh: bool,
@@ -186,6 +216,7 @@ def run(
     use_android = use_android or use_re or cfg.android
     use_usb = use_usb or cfg.usb
     use_ios = use_ios or cfg.ios
+    use_keyring = use_keyring or cfg.keyring
     use_wayland = use_wayland or cfg.wayland
     use_x11 = use_x11 or cfg.x11
     use_ssh = use_ssh or cfg.ssh
@@ -213,6 +244,8 @@ def run(
                              use_android=use_android,
                              use_usb=use_usb,
                              use_ios=use_ios,
+                             use_keyring=use_keyring,
+                             keyring_keys=[*cfg.keyring_keys, *_split_keys(keyring_keys)],
                              use_wayland=use_wayland,
                              use_x11=use_x11,
                              use_ssh=use_ssh,

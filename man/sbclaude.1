@@ -213,6 +213,18 @@ Mount the host usbmuxd socket so frida can reach an iOS device.
 .UNINDENT
 .INDENT 0.0
 .TP
+.B \-\-keyring
+Forward the D\-Bus session bus to reach the host keyring. Grants every secret on that bus, not one.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-keyring\-keys <keys>
+Comma\-separated NAME=SERVICE secrets to copy in as environment variables, such as
+GH_TOKEN=gh:github.com or GITLAB_TOKEN=glab:gitlab.com. Grants only those, and needs no
+\-\-keyring.
+.UNINDENT
+.INDENT 0.0
+.TP
 .B \-\-wayland
 Forward the Wayland socket for GUIs (preferred over \-\-x11).
 .UNINDENT

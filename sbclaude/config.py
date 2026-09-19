@@ -103,6 +103,28 @@ class Config:
     """Image override, or ``None`` to use the default."""
     ios: bool = False
     """Whether to mount the host usbmuxd socket so frida can reach an iOS device."""
+    keyring: bool = False
+    """
+    Whether to forward the D-Bus session bus so the box reaches the host Secret Service.
+
+    Use this where an application in the box cannot take its secret from an environment variable
+    and insists on the Secret Service itself. It grants the whole session bus rather than one
+    secret: every entry in the login keyring becomes readable, along with the other services on
+    that bus. Prefer ``keyring_keys`` wherever an environment variable will do.
+    """
+    keyring_keys: list[str] = field(default_factory=list)
+    """
+    Named host secrets to copy into the box, each written ``NAME=SERVICE``.
+
+    NAME becomes an environment variable and SERVICE is the keyring ``service`` attribute the
+    secret is stored under, so ``GH_TOKEN=gh:github.com`` reads the ``gh`` token and presents it as
+    ``GH_TOKEN``, and ``GITLAB_TOKEN=glab:gitlab.com`` does the same for ``glab``. Reading uses
+    ``secret-tool`` on the host.
+
+    Prefer this over ``keyring`` whenever the applications in the box accept their secrets through
+    the environment. It grants the named secrets rather than the whole bus, and it needs no bus
+    forwarding.
+    """
     manage_uv_env: bool = True
     """
     Whether to give the box its own virtualenv instead of the project's ``.venv``.
@@ -207,6 +229,8 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   harden=bool(data.get('harden', True)),
                   image=(str(data['image']) if data.get('image') else None),
                   ios=bool(data.get('ios', False)),
+                  keyring=bool(data.get('keyring', False)),
+                  keyring_keys=_str_list(data.get('keyring_keys')),
                   manage_uv_env=bool(data.get('manage_uv_env', True)),
                   memory=(str(data['memory']) if data.get('memory') is not None else None),
                   modify=bool(data.get('modify', True)),
