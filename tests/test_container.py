@@ -360,6 +360,45 @@ def test_run_reports_a_container_that_never_started(code: int, capsys: pytest.Ca
     assert 'docker run' in logged
 
 
+def test_run_unlocks_the_gpg_agent_from_the_terminal(docker_run: Callable[..., MagicMock],
+                                                     mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', side_effect=lambda name: f'/usr/bin/{name}')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.syslog.syslog')
+    mocker.patch('sbclaude.container.sys.stdin.isatty', return_value=True)
+    mocker.patch('sbclaude.container.sys.stdin.fileno', return_value=0)
+    mocker.patch('sbclaude.container.os.ttyname', return_value='/dev/pts/7')
+    run = mocker.patch('sbclaude.container.sp.run')
+    run.return_value.returncode = 0
+    run.return_value.stdout = ''
+    docker_run([0])
+    project = tmp_path / 'p'
+    project.mkdir()
+    container.run(container.RunSpec(project=project, name='n', use_gpg=True))
+    commands = [call[0][0] for call in run.call_args_list if call[0]]
+    assert ('/usr/bin/gpg-connect-agent', 'updatestartuptty', '/bye') in commands
+    assert any(command[:2] == ('/usr/bin/gpg', '--clearsign') for command in commands)
+    assert all(call.kwargs['env']['GPG_TTY'] == '/dev/pts/7' for call in run.call_args_list
+               if call[0] and call[0][0][0].startswith('/usr/bin/gpg'))
+
+
+def test_run_skips_the_gpg_unlock_without_a_terminal(docker_run: Callable[..., MagicMock],
+                                                     mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', side_effect=lambda name: f'/usr/bin/{name}')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.syslog.syslog')
+    mocker.patch('sbclaude.container.sys.stdin.isatty', return_value=False)
+    run = mocker.patch('sbclaude.container.sp.run')
+    run.return_value.stdout = ''
+    docker_run([0])
+    project = tmp_path / 'p'
+    project.mkdir()
+    container.run(container.RunSpec(project=project, name='n', use_gpg=True))
+    assert not any(call[0] and '--clearsign' in call[0][0] for call in run.call_args_list)
+
+
 def test_run_stops_retrying_once_a_box_starts(capsys: pytest.CaptureFixture[str],
                                               docker_run: Callable[..., MagicMock],
                                               mocker: MockerFixture, tmp_path: Path) -> None:
@@ -1022,6 +1061,22 @@ def test_build_run_argv_gpg_bridges_the_runtime_socket_too(mocker: MockerFixture
     project = tmp_path / 'p'
     project.mkdir()
     argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpg=True))
+    # The directory, not the socket file, so an agent restarted on the host stays reachable.
+    assert f'{sock.parent}:/run/user/{os.getuid()}/gnupg' in argv
+
+
+def test_build_run_argv_gpg_nonstandard_socket_name(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch.dict(os.environ, {'GNUPGHOME': ''})
+    (tmp_path / '.gnupg').mkdir()
+    sock = tmp_path / 'run' / 'agent.sock'
+    mocker.patch('sbclaude.container.sp.run', return_value=mocker.MagicMock(stdout=f'{sock}\n'))
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpg=True))
+    # gpg in the box looks only for S.gpg-agent, so a socket of another name is mounted as that.
     assert f'{sock}:/run/user/{os.getuid()}/gnupg/S.gpg-agent' in argv
 
 
@@ -1042,7 +1097,7 @@ def test_build_run_argv_gpg_socket_already_at_the_runtime_path(mocker: MockerFix
     project.mkdir()
     argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', use_gpg=True))
     assert f'{sock}:{gnupg / "S.gpg-agent"}' in argv
-    assert f'{sock}:{sock}' in argv
+    assert f'{sock.parent}:{sock.parent}' in argv
 
 
 def test_build_run_argv_gpg_socket_in_home(mocker: MockerFixture, tmp_path: Path) -> None:

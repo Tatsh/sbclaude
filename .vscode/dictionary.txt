@@ -22,6 +22,7 @@ caplog
 capsys
 cdrommsf
 chowning
+clearsign
 cmdline
 commitizen
 conftest
@@ -247,11 +248,13 @@ tomlq
 tostring
 trustdb
 tryfirst
+ttyname
 typelib
 ubyte
 udvare
 undraft
 undrafted
+updatestartuptty
 usbmux
 usbmuxd
 usbutils

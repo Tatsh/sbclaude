@@ -9,6 +9,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
 
+### Fixed
+
+- `--gpg` mounts the directory holding the host agent socket rather than the socket file. A file
+  mount pinned the socket's inode, so an agent restarted on the host after the box started left
+  signing in the box talking to a socket nothing listened on.
+- `--gpg` unlocks the host agent from the launching terminal before the box starts. The box has no
+  terminal for pinentry, and under tmux `GPG_TTY` is usually stale or unset, so an agent whose
+  cached passphrase had expired could not prompt and signing failed. Signing in the box lasts for
+  the agent's cache lifetime, set by `default-cache-ttl` in `gpg-agent.conf`.
+
 ## [0.3.0] - 2026-09-21
 
 ### Added

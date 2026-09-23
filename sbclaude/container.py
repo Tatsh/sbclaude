@@ -62,6 +62,12 @@ Hardening argument barring privilege escalation, dropped by ``--sudo``.
 set the kernel ignores the setuid bit on ``execve``. A setuid-root ``sudo`` is therefore inert
 under it (it says so and exits 1), so passwordless escalation and this flag cannot coexist.
 """
+_GPG_AGENT_SOCKET_NAME = 'S.gpg-agent'
+"""
+File name gpg looks for inside its socket directory.
+
+:meta hide-value:
+"""
 USBMUXD_SOCKET = Path('/var/run/usbmuxd')
 """Host usbmuxd socket that frida's usbmux backend uses to reach an iOS device."""
 LOCKDOWN_DIR = Path('/var/lib/lockdown')
@@ -824,8 +830,48 @@ def _gpg_args(home: Path, uid: int) -> list[str]:
         # match but the files do not: /run/user/<uid> inside the box is its own tmpfs, so
         # skipping this leaves nothing at the very path the box's gpg prefers, which is the
         # usual host layout rather than an unusual one.
-        args += _v(socket, Path(f'/run/user/{uid}/gnupg/S.gpg-agent'))
+        #
+        # The directory is mounted rather than the socket file. A file bind mount pins the
+        # socket's inode, so an agent restarted on the host after the box started left the box
+        # holding a socket nothing listens on. A directory mount resolves the name afresh and
+        # reaches the new agent. A socket with a nonstandard name falls back to the file mount,
+        # because gpg in the box only looks for S.gpg-agent.
+        runtime_dir = Path(f'/run/user/{uid}/gnupg')
+        if socket.name == _GPG_AGENT_SOCKET_NAME:
+            args += _v(socket.parent, runtime_dir)
+        else:
+            args += _v(socket, runtime_dir / _GPG_AGENT_SOCKET_NAME)
     return args
+
+
+def _unlock_gpg_agent() -> None:
+    """
+    Unlock the host gpg-agent from the terminal sbclaude runs in, before the box takes it over.
+
+    Signing inside the box reaches the host agent, but the box has no terminal of its own. When
+    the passphrase is not cached, the agent has nowhere to show pinentry and signing fails. Under
+    tmux in particular ``GPG_TTY`` is usually stale or unset, so an agent unlocked from another
+    terminal does not help once its cache expires.
+
+    This points the agent's pinentry at the current terminal and makes one throwaway signature,
+    which prompts only if the passphrase is not already cached. The passphrase then lasts for the
+    agent's cache lifetime (``default-cache-ttl`` in ``gpg-agent.conf``), which also bounds how
+    long signing keeps working in the box. Any failure is reported and ignored, since a box
+    without signing is still usable.
+    """
+    if not sys.stdin.isatty() or not (gpg := which('gpg')):
+        return
+    env = {**os.environ, 'GPG_TTY': os.ttyname(sys.stdin.fileno())}
+    if connect := which('gpg-connect-agent'):
+        sp.run((connect, 'updatestartuptty', '/bye'), capture_output=True, check=False, env=env)
+    signed = sp.run((gpg, '--clearsign', '--output', os.devnull),
+                    capture_output=True,
+                    check=False,
+                    env=env,
+                    input=b'sbclaude\n')
+    if signed.returncode != 0:
+        sys.stderr.write('sbclaude: --gpg: could not unlock the signing key; commits made in '
+                         'the box may fail to sign\n')
 
 
 def _global_gitconfig_files(home: Path) -> Iterator[Path]:
@@ -1103,6 +1149,8 @@ def run(spec: RunSpec) -> int:
             image,
             log=lambda line: print(line, file=sys.stderr),  # ruff: ignore[print]
             debian_mirror=spec.debian_mirror)
+    if spec.use_gpg:
+        _unlock_gpg_agent()
     code = 0
     for attempt in range(1, _LAUNCH_ATTEMPTS + 1):
         if attempt > 1:
