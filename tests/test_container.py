@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
+import io
 import json
 import logging
 import os
 import subprocess as sp
+import tarfile
 import tempfile
 
 import docker.errors
@@ -1702,3 +1704,133 @@ def test_stop_all(mocker: MockerFixture) -> None:
     assert list(container.stop()) == ['sbclaude-other-abc123']
     ctr.remove.assert_called_once_with(force=True)
     assert client.containers.list.call_args.kwargs['filters'] == {'label': 'sbclaude.managed=1'}
+
+
+def _opencode_archive(member: str = 'opencode') -> io.BytesIO:
+    data = io.BytesIO()
+    with tarfile.open(fileobj=data, mode='w:gz') as tar:
+        info = tarfile.TarInfo(member)
+        info.size = len(b'ELF')
+        tar.addfile(info, io.BytesIO(b'ELF'))
+    data.seek(0)
+    return data
+
+
+def test_opencode_binary_prefers_path(mocker: MockerFixture, tmp_path: Path) -> None:
+    binary = tmp_path / 'opencode'
+    binary.write_text('')
+    mocker.patch('sbclaude.container.which', return_value=str(binary))
+    urlopen = mocker.patch('sbclaude.container.urllib.request.urlopen')
+    assert container.opencode_binary() == binary.resolve()
+    assert not urlopen.called
+
+
+def test_opencode_binary_downloads_when_missing(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value=None)
+    mocker.patch('sbclaude.container.user_cache_path', return_value=tmp_path)
+    mocker.patch('sbclaude.container.platform.machine', return_value='aarch64')
+    urlopen = mocker.patch('sbclaude.container.urllib.request.urlopen')
+    urlopen.return_value.__enter__.return_value = _opencode_archive('bin/opencode')
+    binary = container.opencode_binary()
+    assert binary == tmp_path / 'opencode'
+    assert binary.read_bytes() == b'ELF'
+    assert os.access(binary, os.X_OK)
+    assert urlopen.call_args[0][0].endswith('/opencode-linux-arm64.tar.gz')
+    assert list(tmp_path.iterdir()) == [binary]
+
+
+def test_opencode_binary_reuses_the_download(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value=None)
+    mocker.patch('sbclaude.container.user_cache_path', return_value=tmp_path)
+    (tmp_path / 'opencode').write_text('')
+    urlopen = mocker.patch('sbclaude.container.urllib.request.urlopen')
+    assert container.opencode_binary() == tmp_path / 'opencode'
+    assert not urlopen.called
+
+
+def test_opencode_binary_download_failure(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value=None)
+    mocker.patch('sbclaude.container.user_cache_path', return_value=tmp_path)
+    mocker.patch('sbclaude.container.platform.machine', return_value='x86_64')
+    mocker.patch('sbclaude.container.urllib.request.urlopen', side_effect=OSError('offline'))
+    with pytest.raises(FileNotFoundError, match='offline'):
+        container.opencode_binary()
+    assert not list(tmp_path.iterdir())
+
+
+def test_opencode_binary_archive_without_binary(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value=None)
+    mocker.patch('sbclaude.container.user_cache_path', return_value=tmp_path)
+    mocker.patch('sbclaude.container.platform.machine', return_value='x86_64')
+    urlopen = mocker.patch('sbclaude.container.urllib.request.urlopen')
+    urlopen.return_value.__enter__.return_value = _opencode_archive('README.md')
+    with pytest.raises(FileNotFoundError, match='has no opencode binary'):
+        container.opencode_binary()
+    assert not list(tmp_path.iterdir())
+
+
+def test_opencode_binary_unknown_architecture(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value=None)
+    mocker.patch('sbclaude.container.user_cache_path', return_value=tmp_path)
+    mocker.patch('sbclaude.container.platform.machine', return_value='riscv64')
+    with pytest.raises(FileNotFoundError, match='riscv64'):
+        container.opencode_binary()
+
+
+def test_build_run_argv_opencode(mocker: MockerFixture, tmp_path: Path,
+                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    for variable in ('XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME'):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/opencode')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    (tmp_path / '.claude').mkdir()
+    (tmp_path / '.claude' / 'settings.json').write_text('{}')
+    project = tmp_path / 'proj'
+    project.mkdir()
+    argv, cleanup = container.build_run_argv(
+        container.RunSpec(project=project, name='n', agent='opencode', recover=True))
+    assert cleanup is None
+    assert '/usr/bin/opencode:/usr/local/bin/opencode:ro' in argv
+    assert 'SBCLAUDE_AGENT=opencode' in argv
+    assert 'OPENCODE_DISABLE_AUTOUPDATE=1' in argv
+    assert f'OPENCODE_PERMISSION={container.OPENCODE_PERMISSION}' in argv
+    assert f'{tmp_path}/data/opencode:{tmp_path}/.local/share/opencode' in argv
+    assert f'{tmp_path}/.config/opencode:{tmp_path}/.config/opencode' in argv
+    assert (tmp_path / 'data' / 'opencode').is_dir()
+    assert (tmp_path / '.cache' / 'opencode').is_dir()
+    assert not any('/.claude' in arg or '/usr/local/bin/claude' in arg for arg in argv)
+    assert 'SBCLAUDE_RECOVER=1' not in argv
+    assert f'{project}:{project}' in argv
+
+
+def test_build_run_argv_env_overrides_opencode_permission(mocker: MockerFixture,
+                                                          tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/opencode')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'proj'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project,
+                          name='n',
+                          agent='opencode',
+                          env={'OPENCODE_PERMISSION': '{"bash":"ask"}'}))
+    assert (argv.index('OPENCODE_PERMISSION={"bash":"ask"}')
+            > argv.index(f'OPENCODE_PERMISSION={container.OPENCODE_PERMISSION}'))
+
+
+def test_run_does_not_blame_the_tui_for_opencode(capsys: pytest.CaptureFixture[str],
+                                                 docker_run: Callable[..., MagicMock],
+                                                 mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/opencode')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.syslog.syslog')
+    docker_run(1)
+    project = tmp_path / 'p'
+    project.mkdir()
+    container.run(container.RunSpec(project=project, name='n', agent='opencode'))
+    err = capsys.readouterr().err
+    assert 'exited with 1' in err
+    assert '--no-fullscreen' not in err

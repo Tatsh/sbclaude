@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Recreate the host user's identity inside the container, then drop privileges
-# and launch Claude Code with no permission prompts.
+# and launch Claude Code (or opencode) with no permission prompts.
 #
 # Why mirror the host identity (UID/GID/USER/HOME) instead of using a baked-in
 # user? Two reasons:
@@ -154,9 +154,22 @@ fi
 # The host config records installMethod=native, so claude expects its own binary at
 # ~/.local/bin/claude. We bind-mount it at /usr/local/bin/claude instead, so create the expected
 # symlink to silence the "claude command not found at ~/.local/bin/claude" warning.
-mkdir -p "$HOST_HOME/.local/bin"
-ln -sf /usr/local/bin/claude "$HOST_HOME/.local/bin/claude"
-chown -R "$HOST_UID:$HOST_GID" "$HOST_HOME/.local" 2>/dev/null || true
+#
+# opencode's XDG directories are mounted beneath ~/.cache and ~/.local, and Docker creates their
+# parents root-owned for the same reason as ~/.config above. Only the parents are re-owned, never
+# recursively, because the directories inside them are host paths.
+SBCLAUDE_AGENT="${SBCLAUDE_AGENT:-claude}"
+if [ "$SBCLAUDE_AGENT" = opencode ]; then
+    for _dir in .cache .local .local/share .local/state; do
+        if [ -d "$HOST_HOME/$_dir" ]; then
+            chown "$HOST_UID:$HOST_GID" "$HOST_HOME/$_dir" 2>/dev/null || true
+        fi
+    done
+else
+    mkdir -p "$HOST_HOME/.local/bin"
+    ln -sf /usr/local/bin/claude "$HOST_HOME/.local/bin/claude"
+    chown -R "$HOST_UID:$HOST_GID" "$HOST_HOME/.local" 2>/dev/null || true
+fi
 
 # Inject the no-prompt flag unless explicitly disabled (SBCLAUDE_SKIP_PERMISSIONS=0).
 SKIP_FLAG=()
@@ -331,10 +344,18 @@ if [ "${SBCLAUDE_RECOVER:-0}" = "1" ]; then
         ' _ "$PWD" "${RECOVER_GITIGNORE_ENTRIES[@]}"
 fi
 
-# Drop to the mapped user with a correct HOME/USER/PATH environment and exec claude.
+# Drop to the mapped user with a correct HOME/USER/PATH environment and exec the agent.
 # NOTE: gosu is given the UID only, deliberately. Passing "uid:gid" would set the group list to
 # exactly that one group, discarding the device groups re-added above. The primary group is
 # already HOST_GID via the passwd entry.
+#
+# opencode has no skip-permissions flag. sbclaude allows every tool through OPENCODE_PERMISSION
+# instead.
+if [ "$SBCLAUDE_AGENT" = opencode ]; then
+    exec gosu "$HOST_UID" \
+        env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
+        opencode "$@"
+fi
 exec gosu "$HOST_UID" \
     env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
     claude "${SKIP_FLAG[@]}" "$@"

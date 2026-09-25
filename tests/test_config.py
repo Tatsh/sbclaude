@@ -245,3 +245,10 @@ def test_load_config_harden_and_docker_args(tmp_path: Path) -> None:
     cfg = load_config(path)
     assert cfg.harden is False
     assert cfg.docker_args == ['--memory', '2g']
+
+
+def test_load_config_agent(tmp_path: Path) -> None:
+    assert load_config(tmp_path / 'missing.toml').agent == 'claude'
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nagent = "opencode"\n')
+    assert load_config(path).agent == 'opencode'

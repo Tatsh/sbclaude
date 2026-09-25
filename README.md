@@ -30,10 +30,10 @@
 
 <!-- WISWA-GENERATED-README:STOP -->
 
-`sbclaude` runs **Claude Code** inside a throwaway Docker container with the bash sandbox
-and permission prompts **disabled**, against a configurable set of host bind mounts. The
-container stores nothing of its own (`--rm`); everything lives on the host. You only ever
-invoke `sbclaude` — it manages its own image and containers via the Docker SDK.
+`sbclaude` runs **Claude Code** (or [opencode](#opencode)) inside a throwaway Docker container
+with the bash sandbox and permission prompts **disabled**, against a configurable set of host bind
+mounts. The container stores nothing (`--rm`); everything lives on the host. You only ever invoke
+`sbclaude`. It manages its own image and containers via the Docker SDK.
 
 **The host must be Linux.** The host copy of `claude` is bind-mounted into a Linux container and
 executed there, so the host must supply an ELF build of it (a Mac's own `claude` is Mach-O and
@@ -120,6 +120,7 @@ sbclaude run -p ~/dev/foo         # explicit project dir (writable, becomes work
 sbclaude run -r /data -w ~/scratch   # extra read-only / read-write mounts
 sbclaude run --re --x11           # Ghidra/Android mounts + GUI passthrough
 sbclaude run -- --version         # everything after -- goes to claude
+sbclaude run --agent opencode     # run opencode instead of claude
 sbclaude ls                       # list running sbclaude containers
 sbclaude stop [--all]             # stop this project's boxes (or all with --all)
 sbclaude shell                    # debug shell in this project's box, as your user
@@ -194,6 +195,7 @@ more than one is running).
 | `--gpg`             | mount the host GnuPG home + agent socket for signing commits                     |
 | `--sudo`            | passwordless `sudo` in the box (drops `no-new-privileges`)                       |
 | `--venv-dir DIR`    | put the box's virtualenv in `DIR` (e.g. a volume) instead of beside the project  |
+| `--agent opencode`  | run opencode instead of claude (host `PATH`, or the latest release downloaded)   |
 | `--claude-binary`   | mount this `claude` build instead of the first one on `PATH`                     |
 | `--no-modify`       | stop sbclaude writing anything into the project directory                        |
 | `--no-fullscreen`   | do not force the fullscreen TUI, so a failing session's output survives          |
@@ -240,6 +242,7 @@ x11 = true       # forward X11 for GUI apps
 # modify = false                  # never write into the project directory (same as --no-modify)
 # venv_dir = "/venv-cache"        # hold the box's virtualenv here (pair with a docker_args volume)
 # claude_binary = "~/bin/claude"  # mount this claude build rather than the first one on PATH
+# agent = "opencode"              # run opencode instead of claude (same as --agent opencode)
 # fullscreen = false              # do not force the fullscreen TUI (keeps start-up errors visible)
 keyring_keys = ["GH_TOKEN=gh:github.com"]          # copy only these host secrets in, as env vars
 pass_env = ["AWS_REGION"]                          # forward host vars (AWS_PROFILE is default)
@@ -250,9 +253,9 @@ rw = []                                            # the project dir is always r
 CLAUDE_CODE_USE_BEDROCK = "1"
 ```
 
-The toggle keys `re`, `ghidra`, `android`, `gpu`, `usb`, `ios`, `keyring`, `wayland`, `x11`, `ssh`,
-`gpg`, and `sudo` mirror the matching `run` flags and default to `false`; setting one is the same as
-always passing that flag.
+The toggle keys `re`, `ghidra`, `android`, `gpu`, `usb`, `ios`, `keyring`, `wayland`,
+`x11`, `ssh`, `gpg`, and `sudo` mirror the matching `run` flags and default to `false`; setting a key
+is the same as always passing the matching flag.
 
 ### Secrets
 
@@ -375,6 +378,28 @@ persist**, which is why this is opt-in. Afterwards the entrypoint appends the re
 `standing-instructions.md`, `statusline-quota-cache.sh`, and the three hook scripts) to the
 project's `.gitignore`, each only when absent. If the install
 fails, the box aborts rather than starting a session that silently lacks recovery.
+
+## opencode
+
+`--agent opencode` (config key `agent`) runs [opencode](https://opencode.ai) in the box instead of
+Claude Code. The host `opencode` on `PATH` is mounted read-only, as `claude` is. When no `opencode`
+is on `PATH`, sbclaude downloads the latest Linux release for the host architecture from GitHub into
+`~/.cache/sbclaude/opencode` and mounts that copy. Later boxes reuse the download. Delete
+`~/.cache/sbclaude/opencode` to fetch a newer release.
+
+opencode has no equivalent of `--dangerously-skip-permissions`. The box instead sets
+`OPENCODE_PERMISSION` to `{"*":"allow"}`, a rule that allows every tool without a prompt. Override
+the rule with `-e OPENCODE_PERMISSION=...`. The mounted binary is read-only, and self-update is disabled
+with `OPENCODE_DISABLE_AUTOUPDATE=1`.
+
+opencode stores its configuration, provider credentials, sessions, and caches in four XDG
+directories (`~/.config/opencode`, `~/.local/share/opencode`, `~/.local/state/opencode`, and
+`~/.cache/opencode`). Each is created on the host when missing and mounted read-write, and a
+sign-in made in the box with `opencode auth login` persists on the host. A directory the host
+relocates with `XDG_CONFIG_HOME` or its siblings is mounted at the default path inside the box.
+
+For opencode, `~/.claude` is not mounted, `settings.json` is not patched, `--no-fullscreen` has no
+effect, and `--session-recover` is ignored with a note.
 
 ## MCP servers
 

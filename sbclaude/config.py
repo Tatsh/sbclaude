@@ -62,6 +62,8 @@ def config_path() -> Path:
 class Config:
     """Resolved sbclaude configuration."""
 
+    agent: str = 'claude'
+    """Coding agent the box runs, ``claude`` or ``opencode``."""
     android: bool = False
     """Whether to mount the Android SDK and related devices."""
     claude_binary: str | None = None
@@ -216,7 +218,8 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
         proj = {key: value for key, value in proj.items() if key not in _GLOBAL_ONLY_KEYS}
         env = {**_str_dict(data.get('env')), **_str_dict(proj.get('env'))}
         data = {**data, **proj, **({'env': env} if env else {})}
-    return Config(android=bool(data.get('android', False)),
+    return Config(agent=str(data.get('agent', 'claude')),
+                  android=bool(data.get('android', False)),
                   claude_binary=(str(data['claude_binary']) if data.get('claude_binary') else None),
                   cpus=(str(data['cpus']) if data.get('cpus') is not None else None),
                   debian_mirror=(str(data['debian_mirror']) if data.get('debian_mirror') else None),

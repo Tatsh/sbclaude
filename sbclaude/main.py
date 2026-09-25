@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 import os
 import sys
 
@@ -13,6 +14,9 @@ import docker.errors
 from . import container
 from .config import Config, config_path, expand_paths, load_config
 from .scaffold import scaffold
+
+if TYPE_CHECKING:
+    from .typing import Agent
 
 __all__ = ('main',)
 
@@ -83,6 +87,11 @@ def main(ctx: click.Context) -> None:
 @click.option('-r', '--ro', 'ro_extra', multiple=True, help='Extra read-only mount.')
 @click.option('-n', '--name', help='Container name (default: sbclaude-<project>).')
 @click.option('-i', '--image', help='Image override.')
+@click.option('-a',
+              '--agent',
+              type=click.Choice(container.AGENTS),
+              help='Coding agent to run in the box (claude by default). opencode is taken from '
+              'PATH, or the latest release is downloaded when PATH has no opencode.')
 @click.option('--claude-binary',
               help='Host claude executable to mount instead of the first one on PATH. Use this to '
               'pin a version, or to supply an ELF build.')
@@ -178,6 +187,7 @@ def run(
     env_extra: tuple[str, ...],
     name: str | None,
     image: str | None,
+    agent: str | None,
     network: str | None,
     debian_mirror: str | None,
     memory: str | None,
@@ -206,7 +216,7 @@ def run(
     debug: bool,
 ) -> None:
     # ruff: ignore[docstring-missing-exception]
-    """Launch claude in a fresh container. Args after ``--`` pass through to claude."""
+    """Launch the agent in a fresh container. Arguments after ``--`` pass through to the agent."""
     setup_logging(debug=debug, loggers={'sbclaude': {}})
     proj = (project or Path.cwd()).resolve()
     cfg = load_config(project=proj)
@@ -222,11 +232,15 @@ def run(
     use_ssh = use_ssh or cfg.ssh
     use_gpg = use_gpg or cfg.gpg
     use_sudo = use_sudo or cfg.sudo
-    debian_mirror = debian_mirror or cfg.debian_mirror
-    memory = memory or cfg.memory
-    cpus = cpus or cfg.cpus
     modify = cfg.modify and not no_modify
     session_recover = session_recover or cfg.recover
+    agent = _agent(agent or cfg.agent)
+    if session_recover and agent != 'claude':
+        click.echo(
+            'sbclaude: session recovery installs Claude Code hooks and is skipped for '
+            f'{agent}.',
+            err=True)
+        session_recover = False
     if session_recover and not modify:
         click.echo(
             'sbclaude: session recovery installs itself into the project, so it is skipped '
@@ -235,6 +249,7 @@ def run(
         session_recover = False
     spec = container.RunSpec(project=proj,
                              name=name or container.unique_name(proj),
+                             agent=agent,
                              claude_binary=claude_binary or cfg.claude_binary,
                              network=network or cfg.network,
                              image=image or cfg.image,
@@ -260,16 +275,43 @@ def run(
                                               venv_dir=venv_dir or cfg.venv_dir),
                              fullscreen=cfg.fullscreen and not no_fullscreen,
                              harden=cfg.harden and not no_harden,
-                             memory=memory,
-                             cpus=cpus,
+                             memory=memory or cfg.memory,
+                             cpus=cpus or cfg.cpus,
                              recover=session_recover,
-                             debian_mirror=debian_mirror,
+                             debian_mirror=debian_mirror or cfg.debian_mirror,
                              extra_args=cfg.docker_args,
                              claude_args=claude_args)
     try:
         raise SystemExit(container.run(spec))
     except (FileNotFoundError, docker.errors.BuildError) as e:
         raise click.ClickException(str(e)) from e
+
+
+def _agent(value: str) -> Agent:
+    """
+    Validate an agent name. A name from a config file bypasses the flag's choices.
+
+    Parameters
+    ----------
+    value : str
+        The requested agent.
+
+    Returns
+    -------
+    Agent
+        The agent.
+
+    Raises
+    ------
+    click.ClickException
+        If the agent is not one sbclaude can run.
+    """
+    match value:
+        case 'claude' | 'opencode':
+            return value
+        case _:
+            msg = f'unknown agent {value!r}; expected one of {", ".join(container.AGENTS)}'
+            raise click.ClickException(msg)
 
 
 def _resolve_env(cfg: Config, proj: Path, env_extra: tuple[str, ...], *, modify: bool,

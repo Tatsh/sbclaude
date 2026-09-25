@@ -718,3 +718,37 @@ def test_scaffold_noclip_os_error(runner: CliRunner, mocker: MockerFixture, tmp_
     assert result.exit_code != 0
     assert 'read-only file system' in result.output
     assert not isinstance(result.exception, OSError)
+
+
+@pytest.mark.parametrize(('args', 'cfg_agent'), [(['run', '--agent', 'opencode'], 'claude'),
+                                                 (['run'], 'opencode')])
+def test_run_agent_reaches_the_spec(args: list[str], cfg_agent: str, runner: CliRunner,
+                                    mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(agent=cfg_agent))
+    assert runner.invoke(main, args).exit_code == 0
+    assert run.call_args[0][0].agent == 'opencode'
+
+
+def test_run_agent_defaults_to_claude(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].agent == 'claude'
+
+
+def test_run_rejects_an_unknown_agent_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(agent='codex'))
+    result = runner.invoke(main, ['run'])
+    assert result.exit_code == 1
+    assert "unknown agent 'codex'" in result.output
+    assert not run.called
+
+
+def test_run_opencode_disables_session_recovery(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    result = runner.invoke(main, ['run', '--agent', 'opencode', '--session-recover'])
+    assert run.call_args[0][0].recover is False
+    assert 'is skipped for opencode' in result.output

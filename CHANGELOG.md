@@ -9,6 +9,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
 
+### Added
+
+- `--agent opencode` (config key `agent`) runs opencode in the box instead of Claude Code. The host
+  `opencode` on `PATH` is mounted, or the latest release is downloaded into the sbclaude cache when
+  `PATH` has none. Every tool is allowed through `OPENCODE_PERMISSION`. opencode's XDG directories
+  are mounted read-write, and credentials and sessions made in the box persist on the host.
+
 ### Fixed
 
 - `--gpg` mounts the directory holding the host agent socket rather than the socket file. A file

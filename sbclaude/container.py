@@ -12,36 +12,49 @@ from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 from shutil import which
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 import codecs
 import getpass
 import hashlib
 import json
 import logging
 import os
+import platform
 import re
 import secrets
 import shlex
+import shutil
 import subprocess as sp
 import sys
 import syslog
+import tarfile
 import tempfile
 import time
+import urllib.request
 
+from platformdirs import user_cache_path
 import docker
 import docker.errors
+
+from .typing import Agent
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
 log = logging.getLogger(__name__)
 
-__all__ = ('IMAGE_BASE', 'LABEL', 'RunSpec', 'build_images', 'config_dir', 'default_name',
+__all__ = ('AGENTS', 'IMAGE_BASE', 'LABEL', 'RunSpec', 'build_images', 'config_dir', 'default_name',
            'delete_images', 'ensure_image', 'gpu_ready', 'image_exists', 'image_up_to_date',
-           'is_python_project', 'list_managed', 'project_containers', 'run', 'shell', 'stop',
-           'transient_uv_project_environment', 'unique_name', 'uv_project_environment',
-           'uv_project_environment_in')
+           'is_python_project', 'list_managed', 'opencode_binary', 'project_containers', 'run',
+           'shell', 'stop', 'transient_uv_project_environment', 'unique_name',
+           'uv_project_environment', 'uv_project_environment_in')
 
+AGENTS = get_args(Agent)
+"""
+Coding agents the box can run.
+
+:meta hide-value:
+"""
 LABEL = 'sbclaude.managed'
 """Docker label marking a container as sbclaude-managed."""
 PROJECT_LABEL = 'sbclaude.project'
@@ -107,6 +120,39 @@ Pause between GPU probes, giving a card resuming from D3cold time to answer.
 _GPU_PROBE_TIMEOUT_SECONDS = 5.0
 """
 How long a single GPU probe may take; a wedged driver can hang one indefinitely.
+
+:meta hide-value:
+"""
+OPENCODE_RELEASE_URL = ('https://github.com/anomalyco/opencode/releases/latest/download/'
+                        'opencode-linux-{arch}.tar.gz')
+"""Release archive downloaded when ``opencode`` is not on ``PATH``, keyed by architecture."""
+_OPENCODE_ARCHES = {'aarch64': 'arm64', 'amd64': 'x64', 'arm64': 'arm64', 'x86_64': 'x64'}
+"""
+Release architecture names for each value :py:func:`platform.machine` may report.
+
+:meta hide-value:
+"""
+_OPENCODE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
+"""
+How long the release download may stall before it is abandoned.
+
+:meta hide-value:
+"""
+OPENCODE_XDG_DIRS = (('XDG_CACHE_HOME', '.cache'), ('XDG_CONFIG_HOME', '.config'),
+                     ('XDG_DATA_HOME', '.local/share'), ('XDG_STATE_HOME', '.local/state'))
+"""
+XDG base directories opencode stores under, each with its default location relative to home.
+
+The data directory has the provider credentials (``auth.json``) and the session database. A box
+without them starts signed out with no history.
+
+:meta hide-value:
+"""
+OPENCODE_PERMISSION = '{"*":"allow"}'
+"""
+Permission rules that allow opencode every tool in the box without prompting.
+
+The object form is required. A bare ``"allow"`` string is read as a map of its characters.
 
 :meta hide-value:
 """
@@ -183,8 +229,10 @@ class RunSpec:
     """Project path (read-write, becomes the working directory)."""
     extra_args: list[str] = field(default_factory=list)
     """Extra arguments passed to ``docker run``."""
+    agent: Agent = 'claude'
+    """Coding agent the box runs."""
     claude_args: tuple[str, ...] = ()
-    """Arguments forwarded to ``claude``."""
+    """Arguments forwarded to the agent."""
     claude_binary: str | None = None
     """Host ``claude`` executable to mount, or ``None`` to take the first one on ``PATH``."""
     cpus: str | None = None
@@ -462,6 +510,72 @@ def claude_binary(override: str | None = None) -> Path:
     return Path(found).resolve()
 
 
+def opencode_binary() -> Path:
+    """
+    Locate the host ``opencode`` binary, downloading the latest release when there is none.
+
+    The download is cached under the sbclaude cache directory and reused by every later box. It is
+    never updated. Delete the cached file to fetch a newer release.
+
+    Returns
+    -------
+    Path
+        The resolved binary path.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``opencode`` is not on ``PATH`` and the release cannot be downloaded.
+    """  # ruff: ignore[docstring-extraneous-exception]
+    if found := which('opencode'):
+        return Path(found).resolve()
+    cached = user_cache_path('sbclaude') / 'opencode'
+    if not cached.is_file():
+        _download_opencode(cached)
+    return cached
+
+
+def _download_opencode(dest: Path) -> None:
+    machine = platform.machine().lower()
+    if not (arch := _OPENCODE_ARCHES.get(machine)):
+        msg = f"'opencode' not found on PATH, and there is no opencode release for {machine}"
+        raise FileNotFoundError(msg)
+    url = OPENCODE_RELEASE_URL.format(arch=arch)
+    sys.stderr.write(f'sbclaude: opencode not found on PATH; downloading {url}\n')
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    # The binary is written to a temporary file beside the destination and renamed into place. An
+    # interrupted download or a second box downloading at the same time then never produces a
+    # truncated binary to be mounted.
+    fd, name = tempfile.mkstemp(dir=dest.parent, prefix='opencode.', suffix='.partial')
+    partial = Path(name)
+    found = False
+    try:
+        with (
+                os.fdopen(fd, 'wb') as out,
+                urllib.request.urlopen(  # ruff: ignore[suspicious-url-open-usage]
+                    url,
+                    timeout=_OPENCODE_DOWNLOAD_TIMEOUT_SECONDS) as response,
+                tarfile.open(fileobj=response, mode='r|gz') as tar):
+            # Only the file's bytes are copied. Nothing is extracted by name, and a member path
+            # cannot place anything outside the cache directory.
+            for member in tar:
+                if member.isfile() and Path(
+                        member.name).name == 'opencode' and (src := tar.extractfile(member)):
+                    shutil.copyfileobj(src, out)
+                    found = True
+                    break
+    except (OSError, tarfile.TarError) as e:
+        partial.unlink(missing_ok=True)
+        msg = f'could not download opencode from {url}: {e}'
+        raise FileNotFoundError(msg) from e
+    if not found:
+        partial.unlink(missing_ok=True)
+        msg = f'{url} has no opencode binary in it'
+        raise FileNotFoundError(msg)
+    partial.chmod(0o755)
+    partial.replace(dest)
+
+
 def _patched_settings(settings: Path, *, fullscreen: bool = True) -> Path:
     """
     Write a copy of ``settings.json`` patched for the no-prompt box.
@@ -545,7 +659,7 @@ def config_dir(home: Path) -> Path:
 
 def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     """
-    Build the ``docker run`` argv for an interactive claude session.
+    Build the ``docker run`` argv for an interactive agent session.
 
     Parameters
     ----------
@@ -571,32 +685,36 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         'docker', 'run', '--rm', *tty, '--name', spec.name, *hardening, '--label', f'{LABEL}=1',
         '--label', f'{PROJECT_LABEL}={spec.project}', '--network', spec.network, '-e',
         f'HOST_UID={uid}', '-e', f'HOST_GID={gid}', '-e', f'HOST_USER={user}', '-e',
-        f'HOST_HOME={home}', '-e', f'TERM={os.environ.get("TERM", "xterm-256color")}',
-        *_v(claude_binary(spec.claude_binary), '/usr/local/bin/claude', ro=True), *_v(cfg_dir),
-        *_v(spec.project), '-w',
-        str(spec.project)
+        f'HOST_HOME={home}', '-e', f'TERM={os.environ.get("TERM", "xterm-256color")}'
     ]
-    if os.environ.get('CLAUDE_CONFIG_DIR'):
-        argv += ['-e', f'CLAUDE_CONFIG_DIR={cfg_dir}']
-    # The legacy top-level config/auth file (only when it still lives in $HOME).
-    if (home / '.claude.json').is_file():
-        argv += _v(home / '.claude.json')
-    # The entrypoint runs the cc-session-recover installer only when this is set.
-    if spec.recover:
-        argv += ['-e', 'SBCLAUDE_RECOVER=1']
+    cleanup: Path | None = None
+    if spec.agent == 'opencode':
+        argv += _opencode_args(home)
+    else:
+        argv += [
+            *_v(claude_binary(spec.claude_binary), '/usr/local/bin/claude', ro=True), *_v(cfg_dir)
+        ]
+        if os.environ.get('CLAUDE_CONFIG_DIR'):
+            argv += ['-e', f'CLAUDE_CONFIG_DIR={cfg_dir}']
+        # The legacy top-level config/auth file (only when it still lives in $HOME).
+        if (home / '.claude.json').is_file():
+            argv += _v(home / '.claude.json')
+        # The entrypoint runs the cc-session-recover installer only when this is set.
+        if spec.recover:
+            argv += ['-e', 'SBCLAUDE_RECOVER=1']
+        settings = cfg_dir / 'settings.json'
+        if settings.is_file():
+            # Mounted read-write (not :ro) so claude can save settings in-session; writes land in
+            # this throwaway temp file, leaving the host settings.json untouched.
+            cleanup = _patched_settings(settings, fullscreen=spec.fullscreen)
+            argv += _v(cleanup, cfg_dir / 'settings.json')
+    argv += [*_v(spec.project), '-w', str(spec.project)]
     # The entrypoint writes the sudoers drop-in and restores sudo's setuid bit only when this is
     # set, so a box started without --sudo has no sudo even though the image ships it.
     if spec.use_sudo:
         argv += ['-e', 'SBCLAUDE_SUDO=1']
     for key, value in spec.env.items():
         argv += ['-e', f'{key}={value}']
-    cleanup: Path | None = None
-    settings = cfg_dir / 'settings.json'
-    if settings.is_file():
-        # Mounted read-write (not :ro) so claude can save settings in-session; writes land in this
-        # throwaway temp file, leaving the host settings.json untouched.
-        cleanup = _patched_settings(settings, fullscreen=spec.fullscreen)
-        argv += _v(cleanup, cfg_dir / 'settings.json')
     argv += _gitconfig_args(home)
     argv += _host_venv_args(spec.project)
     for path in spec.ro:
@@ -640,6 +758,23 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     argv.append(image)
     argv += list(spec.claude_args)
     return argv, cleanup
+
+
+def _opencode_args(home: Path) -> list[str]:
+    # Each XDG directory is created on the host before it is mounted. Docker would otherwise
+    # create a missing source as root, and the credentials opencode saves on first sign-in would
+    # land in a directory the user cannot write to. The host may relocate a directory with its XDG
+    # variable. The box receives no XDG variable, and the directory is mounted at the default path
+    # the box's opencode looks in.
+    args = [
+        *_v(opencode_binary(), '/usr/local/bin/opencode', ro=True), '-e', 'SBCLAUDE_AGENT=opencode',
+        '-e', 'OPENCODE_DISABLE_AUTOUPDATE=1', '-e', f'OPENCODE_PERMISSION={OPENCODE_PERMISSION}'
+    ]
+    for variable, default in OPENCODE_XDG_DIRS:
+        host = Path(os.environ.get(variable) or home / default) / 'opencode'
+        host.mkdir(parents=True, exist_ok=True)
+        args += _v(host, home / default / 'opencode')
+    return args
 
 
 def gpu_ready() -> bool:
@@ -1126,7 +1261,7 @@ def _report_failure(code: int, seconds: float, argv: Sequence[str], stderr_tail:
 
 def run(spec: RunSpec) -> int:
     """
-    Launch an interactive claude session, retrying a box that never starts.
+    Launch an interactive agent session, retrying a box that never starts.
 
     A box that dies before a session begins is launched again, three attempts in all. The command
     is rebuilt for each attempt rather than reused, so a GPU that the previous attempt's probe woke
@@ -1170,7 +1305,7 @@ def run(spec: RunSpec) -> int:
                         argv,
                         stderr_tail,
                         attempt=attempt,
-                        fullscreen=spec.fullscreen)
+                        fullscreen=spec.fullscreen and spec.agent == 'claude')
     return code
 
 

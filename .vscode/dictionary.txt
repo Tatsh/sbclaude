@@ -171,6 +171,8 @@ numpydoc
 nvidiactl
 nvml
 oneline
+opencode
+opencode's
 openlog
 passthrough
 passwordless
@@ -202,6 +204,7 @@ pythonhosted
 pyvenv
 regen
 ripgreprc
+riscv
 rmse
 rsbuild
 rstcheck
