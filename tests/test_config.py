@@ -252,3 +252,10 @@ def test_load_config_agent(tmp_path: Path) -> None:
     path = tmp_path / 'config.toml'
     path.write_text('[tool.sbclaude]\nagent = "opencode"\n')
     assert load_config(path).agent == 'opencode'
+
+
+def test_load_config_docker(tmp_path: Path) -> None:
+    assert load_config(tmp_path / 'missing.toml').docker is False
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\ndocker = true\n')
+    assert load_config(path).docker is True

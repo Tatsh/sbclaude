@@ -81,6 +81,8 @@ File name gpg looks for inside its socket directory.
 
 :meta hide-value:
 """
+DOCKER_SOCKET = Path('/var/run/docker.sock')
+"""Host Docker daemon socket forwarded by ``--docker`` when ``DOCKER_HOST`` does not set one."""
 USBMUXD_SOCKET = Path('/var/run/usbmuxd')
 """Host usbmuxd socket that frida's usbmux backend uses to reach an iOS device."""
 LOCKDOWN_DIR = Path('/var/lib/lockdown')
@@ -259,6 +261,8 @@ class RunSpec:
     """Read-write mount paths."""
     use_android: bool = False
     """Whether to mount the Android SDK and related devices."""
+    use_docker: bool = False
+    """Whether to forward the host Docker daemon socket (root on the host, in effect)."""
     use_gpg: bool = False
     """Whether to mount the host GnuPG home and agent socket for commit signing."""
     use_ghidra: bool = False
@@ -744,6 +748,7 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         (spec.use_android, lambda: _android_args(home)),
         (spec.use_usb and USB_DEVICE_DIR.is_dir(), lambda: _v(USB_DEVICE_DIR)),
         (spec.use_ios, _ios_args),
+        (spec.use_docker, _docker_args),
         (spec.use_ssh, lambda: _ssh_args(home)),
         (spec.use_gpg, lambda: _gpg_args(home, uid)),
         (spec.use_keyring, lambda: _keyring_args(uid)),
@@ -858,6 +863,40 @@ def _android_args(home: Path) -> Iterator[str]:
         yield from _v(d)
     if KVM_DEVICE.exists():
         yield from ('--device', str(KVM_DEVICE), '--group-add', str(KVM_DEVICE.stat().st_gid))
+
+
+def _docker_args() -> list[str]:
+    """
+    Forward the host Docker daemon to the box.
+
+    The socket is mounted at its own path, and ``DOCKER_HOST`` is set to match. Containers the box
+    starts run on the host daemon. A bind mount the box requests is resolved on the host. Project
+    paths therefore work, because the box mounts them at their host paths. A ``DOCKER_HOST`` that
+    is not a Unix socket (``tcp://``, ``ssh://``) is forwarded unchanged, and anything it needs,
+    such as TLS certificates, must be mounted or forwarded separately.
+
+    Returns
+    -------
+    list[str]
+        ``docker run`` arguments, or an empty list when there is no daemon socket.
+    """
+    host = os.environ.get('DOCKER_HOST', '')
+    if host and not host.startswith('unix://'):
+        return ['-e', f'DOCKER_HOST={host}']
+    sock = Path(host.removeprefix('unix://')) if host else DOCKER_SOCKET
+    if not sock.is_socket():
+        sys.stderr.write(f'sbclaude: --docker: no Docker daemon socket at {sock}; skipping\n')
+        return []
+    sys.stderr.write('sbclaude: --docker: the box controls the host Docker daemon. Unless the '
+                     'host daemon is rootless, --docker grants root on the host.\n')
+    gid = sock.stat().st_gid
+    # The entrypoint re-adds every group granted here except group 0. A socket owned by the root
+    # group is therefore unreachable for the mapped user.
+    if gid == 0:
+        sys.stderr.write(f'sbclaude: --docker: {sock} belongs to the root group, and the box '
+                         'user cannot open it. Give the socket a dedicated group such as '
+                         'docker.\n')
+    return [*_v(sock), '-e', f'DOCKER_HOST=unix://{sock}', '--group-add', str(gid)]
 
 
 def _ios_args() -> list[str]:

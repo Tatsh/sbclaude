@@ -186,6 +186,7 @@ more than one is running).
 | `--android`         | mount Android SDK + `~/.android` + `/dev/kvm` (adb/emulator)                     |
 | `--usb`             | expose `/dev/bus/usb` for adb over USB                                           |
 | `--ios`             | mount the host `usbmuxd` socket so frida reaches an iOS device over USB          |
+| `--docker`          | forward the host Docker daemon socket (root on the host unless rootless)         |
 | `--gpu`             | expose the host GPUs (NVIDIA runtime plus the DRM render nodes)                  |
 | `--keyring`         | forward the D-Bus session bus to reach the host keyring (grants every secret)    |
 | `--keyring-keys`    | copy only the named host secrets in as environment variables                     |
@@ -253,7 +254,7 @@ rw = []                                            # the project dir is always r
 CLAUDE_CODE_USE_BEDROCK = "1"
 ```
 
-The toggle keys `re`, `ghidra`, `android`, `gpu`, `usb`, `ios`, `keyring`, `wayland`,
+The toggle keys `re`, `ghidra`, `android`, `docker`, `gpu`, `usb`, `ios`, `keyring`, `wayland`,
 `x11`, `ssh`, `gpg`, and `sudo` mirror the matching `run` flags and default to `false`; setting a key
 is the same as always passing the matching flag.
 
@@ -481,6 +482,30 @@ The image ships `sudo` but still strips **every** setuid bit at build time; the 
 restores it on `sudo` alone, and only for a box started with `--sudo`. A box started without it
 therefore contains no setuid binary at all.
 
+## Host Docker (`--docker`)
+
+`--docker` (config key `docker`) mounts the host Docker daemon socket at its own path and sets
+`DOCKER_HOST` to match. The image ships the Docker CLI with the buildx and compose plugins. The
+socket comes from `DOCKER_HOST` when `DOCKER_HOST` is a `unix://` address, and `/var/run/docker.sock`
+otherwise. A `tcp://` or `ssh://` `DOCKER_HOST` is forwarded unchanged. Forward its TLS certificates
+or SSH keys separately (`pass_env`, `ro`, or `--ssh`).
+
+Containers started from the box run on the host daemon, beside the box rather than inside it. A bind
+mount such as `docker run -v "$PWD:/src"` is resolved on the host. Project paths work because the
+box mounts them at their host paths. A path that exists only inside the box does not. With the
+default host networking, a port a container publishes is on the box's `localhost` too.
+
+**`--docker` grants root on the host.** An agent that controls the daemon can start
+`docker run --privileged -v /:/host` and bypass every restriction under [Hardening](#hardening).
+The agent can also stop or enter every other container, including other boxes. Containers the agent
+starts are not removed by `sbclaude stop`. To limit the damage, run a
+[rootless Docker daemon](https://docs.docker.com/engine/security/rootless/) under a separate user
+for sbclaude and point `DOCKER_HOST` at its socket. A breakout then gets the separate user's rights,
+not root.
+
+The box joins the group that owns the socket. A socket owned by the root group cannot be opened, and
+sbclaude warns about it.
+
 ## RE toolchain (`--re`)
 
 Mounted from the host (your exact versions): **Ghidra** (`analyzeHeadless`, `ghidraRun`),
@@ -568,6 +593,7 @@ without asking, with unrestricted network. Keep writable mounts minimal (the con
 defaults to read-only for everything but the project) and don't mount secrets you don't
 want a fully-autonomous agent to touch. This is why `--ssh`, `--gpg`, and `--sudo` are opt-in:
 the first two expose your private SSH and GPG key material (the GnuPG home read-write) to that
-agent, and the third hands it container root. Forwarding an agent socket does not hand over the
-secret itself, but it does let the box ask the host agent to sign with any key it holds, for as
-long as the box runs.
+agent, and the third hands it container root. `--docker` is opt-in for the same reason and is the
+widest grant of all, because it hands over host root (see [Host Docker](#host-docker---docker)).
+Forwarding an agent socket does not hand over the secret itself, but it does let the box ask the
+host agent to sign with any key it has, for as long as the box runs.

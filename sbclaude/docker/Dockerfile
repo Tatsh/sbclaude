@@ -28,9 +28,15 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable" \
+        > /etc/apt/sources.list.d/docker.list \
     && apt-get update && apt-get install -y --no-install-recommends \
           ninja-build \
         build-essential \
+        docker-buildx-plugin \
+        docker-ce-cli \
+        docker-compose-plugin \
         gh \
         gir1.2-glib-2.0 \
         git \

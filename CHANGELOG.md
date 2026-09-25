@@ -15,6 +15,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `opencode` on `PATH` is mounted, or the latest release is downloaded into the sbclaude cache when
   `PATH` has none. Every tool is allowed through `OPENCODE_PERMISSION`. opencode's XDG directories
   are mounted read-write, and credentials and sessions made in the box persist on the host.
+- `--docker` (config key `docker`) forwards the host Docker daemon socket into the box, and the
+  image now ships the Docker CLI with the buildx and compose plugins. The socket is taken from a
+  `unix://` `DOCKER_HOST` or `/var/run/docker.sock`. Control of the daemon is root on the host
+  unless the daemon is rootless, and sbclaude warns on every start.
 
 ### Fixed
 

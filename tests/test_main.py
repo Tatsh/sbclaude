@@ -752,3 +752,19 @@ def test_run_opencode_disables_session_recovery(runner: CliRunner, mocker: Mocke
     result = runner.invoke(main, ['run', '--agent', 'opencode', '--session-recover'])
     assert run.call_args[0][0].recover is False
     assert 'is skipped for opencode' in result.output
+
+
+@pytest.mark.parametrize(('args', 'cfg_docker'), [(['run', '--docker'], False), (['run'], True)])
+def test_run_docker_reaches_the_spec(args: list[str], runner: CliRunner, mocker: MockerFixture, *,
+                                     cfg_docker: bool) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(docker=cfg_docker))
+    assert runner.invoke(main, args).exit_code == 0
+    assert run.call_args[0][0].use_docker is True
+
+
+def test_run_docker_off_by_default(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run'])
+    assert run.call_args[0][0].use_docker is False

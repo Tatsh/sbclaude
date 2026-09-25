@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import os
+import socket
 import subprocess as sp
 import tarfile
 import tempfile
@@ -1817,6 +1818,69 @@ def test_build_run_argv_env_overrides_opencode_permission(mocker: MockerFixture,
                           env={'OPENCODE_PERMISSION': '{"bash":"ask"}'}))
     assert (argv.index('OPENCODE_PERMISSION={"bash":"ask"}')
             > argv.index(f'OPENCODE_PERMISSION={container.OPENCODE_PERMISSION}'))
+
+
+def _docker_argv(mocker: MockerFixture, tmp_path: Path) -> list[str]:
+    mocker.patch('sbclaude.container.claude_binary', return_value=Path('/usr/bin/claude'))
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    project = tmp_path / 'proj'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n',
+                                                         use_docker=True))
+    return argv
+
+
+@pytest.mark.parametrize('via_docker_host', [True, False])
+def test_build_run_argv_docker_forwards_the_socket(mocker: MockerFixture, tmp_path: Path,
+                                                   monkeypatch: pytest.MonkeyPatch,
+                                                   capsys: pytest.CaptureFixture[str], *,
+                                                   via_docker_host: bool) -> None:
+    with tempfile.TemporaryDirectory() as directory, socket.socket(socket.AF_UNIX) as sock:
+        sock_path = Path(directory) / 'd.sock'
+        sock.bind(str(sock_path))
+        if via_docker_host:
+            monkeypatch.setenv('DOCKER_HOST', f'unix://{sock_path}')
+        else:
+            monkeypatch.delenv('DOCKER_HOST', raising=False)
+            monkeypatch.setattr(container, 'DOCKER_SOCKET', sock_path)
+        argv = _docker_argv(mocker, tmp_path)
+        gid = sock_path.stat().st_gid
+    assert f'{sock_path}:{sock_path}' in argv
+    assert f'DOCKER_HOST=unix://{sock_path}' in argv
+    assert argv[argv.index('--group-add') + 1] == str(gid)
+    assert 'grants root on the host' in capsys.readouterr().err
+
+
+def test_build_run_argv_docker_without_a_socket(mocker: MockerFixture, tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch,
+                                                capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.delenv('DOCKER_HOST', raising=False)
+    monkeypatch.setattr(container, 'DOCKER_SOCKET', tmp_path / 'missing.sock')
+    argv = _docker_argv(mocker, tmp_path)
+    assert not any('DOCKER_HOST' in arg for arg in argv)
+    assert 'no Docker daemon socket' in capsys.readouterr().err
+
+
+def test_build_run_argv_docker_forwards_a_remote_host(mocker: MockerFixture, tmp_path: Path,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('DOCKER_HOST', 'tcp://10.0.0.1:2376')
+    argv = _docker_argv(mocker, tmp_path)
+    assert 'DOCKER_HOST=tcp://10.0.0.1:2376' in argv
+    assert not any('.sock' in arg for arg in argv)
+
+
+def test_build_run_argv_docker_warns_about_a_root_group_socket(
+        mocker: MockerFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    sock = mocker.MagicMock(spec=Path)
+    sock.is_socket.return_value = True
+    sock.stat.return_value.st_gid = 0
+    sock.__str__.return_value = '/var/run/docker.sock'
+    monkeypatch.delenv('DOCKER_HOST', raising=False)
+    monkeypatch.setattr(container, 'DOCKER_SOCKET', sock)
+    argv = _docker_argv(mocker, tmp_path)
+    assert argv[argv.index('--group-add') + 1] == '0'
+    assert 'belongs to the root group' in capsys.readouterr().err
 
 
 def test_run_does_not_blame_the_tui_for_opencode(capsys: pytest.CaptureFixture[str],

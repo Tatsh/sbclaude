@@ -18,6 +18,7 @@ binutils
 bsdmainutils
 bsky
 buildargs
+buildx
 caplog
 capsys
 cdrommsf
@@ -49,6 +50,7 @@ docstrings
 doctree
 doctrees
 domcontentloaded
+dpkg
 dunder
 eeyore
 elif

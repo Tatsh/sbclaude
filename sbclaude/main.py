@@ -114,6 +114,11 @@ def main(ctx: click.Context) -> None:
               is_flag=True,
               help='Mount Android SDK + ~/.android + kvm.')
 @click.option('--usb', 'use_usb', is_flag=True, help='Expose /dev/bus/usb for adb.')
+@click.option('--docker',
+              'use_docker',
+              is_flag=True,
+              help='Forward the host Docker daemon socket. The socket grants root on the host '
+              'unless the daemon is rootless.')
 @click.option('--ios',
               'use_ios',
               is_flag=True,
@@ -201,6 +206,7 @@ def run(
     use_gpu: bool,
     use_android: bool,
     use_usb: bool,
+    use_docker: bool,
     use_ios: bool,
     use_keyring: bool,
     keyring_keys: str,
@@ -258,6 +264,7 @@ def run(
                              use_gpu=use_gpu,
                              use_android=use_android,
                              use_usb=use_usb,
+                             use_docker=use_docker or cfg.docker,
                              use_ios=use_ios,
                              use_keyring=use_keyring,
                              keyring_keys=[*cfg.keyring_keys, *_split_keys(keyring_keys)],

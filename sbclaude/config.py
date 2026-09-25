@@ -82,6 +82,13 @@ class Config:
     """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
     debian_mirror: str | None = None
     """Debian archive mirror used when building the image, or ``None`` for the default."""
+    docker: bool = False
+    """
+    Whether to forward the host Docker daemon socket into the box.
+
+    Control of the daemon is root on the host unless the daemon is rootless. Point ``DOCKER_HOST``
+    at a rootless daemon reserved for sbclaude to limit an escape to the rootless daemon's user.
+    """
     docker_args: list[str] = field(default_factory=list)
     """Extra arguments passed to ``docker run``."""
     env: dict[str, str] = field(default_factory=dict)
@@ -223,6 +230,7 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   claude_binary=(str(data['claude_binary']) if data.get('claude_binary') else None),
                   cpus=(str(data['cpus']) if data.get('cpus') is not None else None),
                   debian_mirror=(str(data['debian_mirror']) if data.get('debian_mirror') else None),
+                  docker=bool(data.get('docker', False)),
                   docker_args=_str_list(data.get('docker_args')),
                   env=_str_dict(data.get('env')),
                   fullscreen=bool(data.get('fullscreen', True)),
