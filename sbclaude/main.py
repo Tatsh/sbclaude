@@ -107,6 +107,11 @@ def main(ctx: click.Context) -> None:
               'use_re',
               is_flag=True,
               help='Enable the Ghidra and Android host mounts together.')
+@click.option('--gentoo',
+              'use_gentoo',
+              is_flag=True,
+              help='Run the Gentoo image for ebuild work. The box is saved between sessions and '
+              'has passwordless sudo.')
 @click.option('--ghidra', 'use_ghidra', is_flag=True, help='Mount host Ghidra (read-only).')
 @click.option('--gpu', 'use_gpu', is_flag=True, help='Expose the host GPUs.')
 @click.option('--android',
@@ -202,6 +207,7 @@ def run(
     claude_args: tuple[str, ...],
     *,
     use_re: bool,
+    use_gentoo: bool,
     use_ghidra: bool,
     use_gpu: bool,
     use_android: bool,
@@ -237,7 +243,9 @@ def run(
     use_x11 = use_x11 or cfg.x11
     use_ssh = use_ssh or cfg.ssh
     use_gpg = use_gpg or cfg.gpg
-    use_sudo = use_sudo or cfg.sudo
+    use_gentoo = use_gentoo or cfg.gentoo
+    # emerge and ebuild run as root. A Gentoo box without sudo could not test a build.
+    use_sudo = use_sudo or cfg.sudo or use_gentoo
     modify = cfg.modify and not no_modify
     session_recover = session_recover or cfg.recover
     agent = _agent(agent or cfg.agent)
@@ -286,6 +294,7 @@ def run(
                              cpus=cpus or cfg.cpus,
                              recover=session_recover,
                              debian_mirror=debian_mirror or cfg.debian_mirror,
+                             distro='gentoo' if use_gentoo else 'debian',
                              extra_args=cfg.docker_args,
                              claude_args=claude_args)
     try:
@@ -449,12 +458,15 @@ def shell(name: str | None, *, as_root: bool) -> None:
 @click.option('--debian-mirror',
               help='Debian archive mirror to bake into the image, e.g. '
               'http://ftp.us.debian.org/debian.')
-def build(debian_mirror: str | None, *, no_cache: bool) -> None:
+@click.option('--gentoo', is_flag=True, help='Build the Gentoo images instead of the Debian ones.')
+def build(debian_mirror: str | None, *, gentoo: bool, no_cache: bool) -> None:
     # ruff: ignore[docstring-missing-exception]
-    """Build the sbclaude Docker images (one per agent) from the packaged Dockerfile."""
+    """Build the sbclaude Docker images (one per agent) for one distribution."""
     mirror = debian_mirror or load_config().debian_mirror
     try:
-        for line in container.build_images(no_cache=no_cache, debian_mirror=mirror):
+        for line in container.build_images(no_cache=no_cache,
+                                           debian_mirror=mirror,
+                                           distro='gentoo' if gentoo else 'debian'):
             click.echo(line)
     except docker.errors.BuildError as e:
         msg = f'Image build failed: {e}'
@@ -466,6 +478,18 @@ def delete_image() -> None:
     """Delete the sbclaude Docker images."""
     removed = container.delete_images()
     click.echo(f'Deleted: {", ".join(removed)}' if removed else 'No sbclaude images to delete.')
+
+
+@main.command()
+@click.option('-p',
+              '--project',
+              type=click.Path(exists=True, file_okay=False, path_type=Path),
+              help='Project dir whose state to discard. Default: cwd.')
+@click.option('--all', 'all_', is_flag=True, help="Discard every project's saved state.")
+def reset(project: Path | None, *, all_: bool) -> None:
+    """Discard a project's saved Gentoo box. The next box starts from the image."""
+    removed = container.delete_state(None if all_ else (project or Path.cwd()).resolve())
+    click.echo(f'Deleted: {", ".join(removed)}' if removed else 'No saved Gentoo state to delete.')
 
 
 @main.command(name='config')

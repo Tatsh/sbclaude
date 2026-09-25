@@ -22,6 +22,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   image now ships the Docker CLI with the buildx and compose plugins. The socket is taken from a
   `unix://` `DOCKER_HOST` or `/var/run/docker.sock`. Control of the daemon is root on the host
   unless the daemon is rootless, and sbclaude warns on every start.
+- `--gentoo` (config key `gentoo`) runs a Gentoo image for editing ebuilds and testing their builds,
+  with pkgcheck, pkgdev, gentoolkit, and portage-utils. On a Gentoo host, the box copies the host's
+  `/etc/portage` once and mounts its repositories, its binary packages read-only, and its distfiles
+  read-write. Dependencies install from the host's binary packages. A project with
+  `profiles/repo_name` is registered as a repository. `--gentoo` implies `--sudo`.
+- A Gentoo box is saved between sessions. Its filesystem is committed to a per-project image when
+  the session ends, and the next box for the project starts from it. The environment of a saved box
+  is passed in a mounted file rather than with `-e`, and no secret is committed with the image.
+  `sbclaude reset` discards the saved state of the current project, of the project given with `-p`,
+  or of every project with `--all`. `sbclaude stop` stops a Gentoo box rather than removing it.
+- `sbclaude-host-quickpkg`, in the Gentoo box, packages a host-installed ebuild that has no binary
+  package, using the host's installed files, and installs the result in the Gentoo box.
+- `sbclaude build --gentoo` builds the Gentoo images, and `sbclaude delete-image` removes them.
+  Saved state survives `delete-image`.
 
 ### Fixed
 

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Package ebuilds installed on the host from the host's installed files, then install them in the
+# box.
+#
+# The script is for a package that the host has installed but has no binary package for. The host's package database
+# and file tree are mounted read-only under HOST_ROOT, and quickpkg reads each package's CONTENTS
+# there. Only the listed packages are copied.
+set -euo pipefail
+
+HOST_ROOT=/run/sbclaude/host-root
+PKGDIR_OUT=/var/cache/sbclaude-quickpkg
+
+if [ $# -eq 0 ]; then
+    echo 'usage: sudo sbclaude-host-quickpkg ATOM...' >&2
+    exit 64
+fi
+if [ "$(id -u)" -ne 0 ]; then
+    echo 'sbclaude-host-quickpkg: run this with sudo.' >&2
+    exit 1
+fi
+if [ ! -d "$HOST_ROOT/var/db/pkg" ]; then
+    echo "sbclaude-host-quickpkg: the host package database is not mounted at $HOST_ROOT." >&2
+    exit 1
+fi
+# On a merged-usr host, /bin, /lib, /lib64, and /sbin are links into /usr and are not mounted, while
+# CONTENTS may still record paths under them. A split-usr host has them mounted as directories.
+for dir in bin lib lib64 sbin; do
+    if [ ! -e "$HOST_ROOT/$dir" ] && [ -d "$HOST_ROOT/usr/$dir" ]; then
+        ln -s "usr/$dir" "$HOST_ROOT/$dir"
+    fi
+done
+mkdir -p "$PKGDIR_OUT"
+ROOT=$HOST_ROOT PKGDIR=$PKGDIR_OUT quickpkg "$@"
+PKGDIR=$PKGDIR_OUT emerge --oneshot --usepkgonly "$@"

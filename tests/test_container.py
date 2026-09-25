@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
+import hashlib
 import io
 import json
 import logging
@@ -19,7 +20,7 @@ import pytest
 from sbclaude import container
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Collection
     from unittest.mock import MagicMock
 
     from pytest_mock import MockerFixture
@@ -672,7 +673,7 @@ def test_ensure_image_passes_debian_mirror(mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.container.image_exists', return_value=False)
     build = mocker.patch('sbclaude.container.build_images', return_value=iter(['built']))
     container.ensure_image(container.IMAGE_BASE, debian_mirror='http://m/debian')
-    build.assert_called_once_with(debian_mirror='http://m/debian')
+    build.assert_called_once_with(debian_mirror='http://m/debian', distro='debian')
 
 
 def test_build_run_argv_android(mocker: MockerFixture, tmp_path: Path) -> None:
@@ -1377,7 +1378,7 @@ def test_ensure_image_builds_when_missing(mocker: MockerFixture) -> None:
     build = mocker.patch('sbclaude.container.build_images', return_value=iter(['built']))
     logged: list[str] = []
     container.ensure_image(container.IMAGE_BASE, log=logged.append)
-    build.assert_called_once_with(debian_mirror=None)
+    build.assert_called_once_with(debian_mirror=None, distro='debian')
     assert 'built' in logged
 
 
@@ -1387,7 +1388,7 @@ def test_ensure_image_rebuilds_when_stale(mocker: MockerFixture) -> None:
     build = mocker.patch('sbclaude.container.build_images', return_value=iter(['built']))
     logged: list[str] = []
     container.ensure_image(container.IMAGE_BASE, log=logged.append)
-    build.assert_called_once_with(debian_mirror=None)
+    build.assert_called_once_with(debian_mirror=None, distro='debian')
     assert any('rebuilding' in line for line in logged)
 
 
@@ -1445,7 +1446,9 @@ def test_delete_images(mocker: MockerFixture) -> None:
     client = mocker.MagicMock()
     client.images.remove.return_value = None
     mocker.patch('sbclaude.container.docker.from_env', return_value=client)
-    assert container.delete_images() == list(container.IMAGE_TAGS.values())
+    assert container.delete_images() == [
+        *container.IMAGE_TAGS.values(), *container.GENTOO_IMAGE_TAGS.values()
+    ]
 
 
 def test_delete_images_absent(mocker: MockerFixture) -> None:
@@ -1956,3 +1959,446 @@ def test_ensure_image_ignores_an_unmanaged_image(mocker: MockerFixture) -> None:
     container.ensure_image('custom:latest')
     up_to_date.assert_not_called()
     build.assert_not_called()
+
+
+def _fake_portageq(mocker: MockerFixture, stdout: str | None) -> None:
+    # Only portageq gets a reply. git and the rest see a missing executable, and build_run_argv
+    # already tolerates one.
+    def run(args: list[str], *_: object, **__: object) -> sp.CompletedProcess[str]:
+        if args[0] == 'portageq' and stdout is not None:
+            return sp.CompletedProcess(args, 0, stdout, '')
+        raise FileNotFoundError(args[0])
+
+    mocker.patch('sbclaude.container.sp.run', side_effect=run)
+
+
+def _gentoo_host(mocker: MockerFixture, tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    config, repos, vdb = tmp_path / 'etc-portage', tmp_path / 'repos', tmp_path / 'vdb'
+    pkgdir, distdir = tmp_path / 'binpkgs', tmp_path / 'distfiles'
+    for path in (config, repos, vdb, pkgdir, distdir):
+        path.mkdir()
+    mocker.patch('sbclaude.container.HOST_PORTAGE_CONFIG', config)
+    mocker.patch('sbclaude.container.HOST_REPOSITORIES', repos)
+    mocker.patch('sbclaude.container.HOST_PACKAGE_DB', vdb)
+    _fake_portageq(mocker, f'{pkgdir}\n{distdir}\n')
+    project = tmp_path / 'p'
+    project.mkdir()
+    return config, pkgdir, distdir, project
+
+
+def test_build_run_argv_gentoo_mounts_the_host_portage(mocker: MockerFixture,
+                                                       tmp_path: Path) -> None:
+    config, pkgdir, distdir, project = _gentoo_host(mocker, tmp_path)
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n',
+                                                         distro='gentoo'))
+    assert f'{config}:/run/sbclaude/host-portage:ro' in argv
+    assert f'{tmp_path / "repos"}:{tmp_path / "repos"}:ro' in argv
+    assert f'{pkgdir}:{pkgdir}:ro' in argv
+    # Read-write. A download made in the box is retained for the host.
+    assert f'{distdir}:{distdir}' in argv
+    assert f'{tmp_path / "vdb"}:/run/sbclaude/host-root{tmp_path / "vdb"}:ro' in argv
+    assert '/usr:/run/sbclaude/host-root/usr:ro' in argv
+    entrypoint = Path(container.__file__).parent / 'docker' / 'entrypoint.sh'
+    assert f'{entrypoint}:/usr/local/bin/entrypoint.sh:ro' in argv
+    assert argv[argv.index('--tmpfs') + 1] == '/tmp:exec'  # ruff: ignore[hardcoded-temp-file]
+    assert '/var/tmp/portage' in argv  # ruff: ignore[hardcoded-temp-file]
+    assert argv[-1] == 'sbclaude-gentoo:latest'
+    # Without a state key the box is as disposable as any other.
+    assert '--rm' in argv
+
+
+def test_build_run_argv_gentoo_skips_what_the_host_lacks(caplog: pytest.LogCaptureFixture,
+                                                         mocker: MockerFixture,
+                                                         tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    for constant in ('HOST_PORTAGE_CONFIG', 'HOST_REPOSITORIES', 'HOST_PACKAGE_DB'):
+        mocker.patch(f'sbclaude.container.{constant}', tmp_path / 'absent' / constant)
+    _fake_portageq(mocker, f'{tmp_path / "no-binpkgs"}\n{tmp_path / "no-distfiles"}\n')
+    project = tmp_path / 'p'
+    project.mkdir()
+    with caplog.at_level(logging.WARNING):
+        argv, _ = container.build_run_argv(
+            container.RunSpec(project=project, name='n', distro='gentoo'))
+    assert not any('absent' in item or 'no-binpkgs' in item or 'no-distfiles' in item
+                   for item in argv)
+    assert 'uses the image configuration' in caplog.text
+
+
+@pytest.mark.parametrize('stdout', [None, 'only-one-line\n'])
+def test_build_run_argv_gentoo_falls_back_to_the_default_portage_dirs(stdout: str | None,
+                                                                      mocker: MockerFixture,
+                                                                      tmp_path: Path) -> None:
+    _gentoo_host(mocker, tmp_path)
+    _fake_portageq(mocker, stdout)
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=tmp_path / 'p', name='n', distro='gentoo'))
+    for default, suffix in (('/var/cache/binpkgs', ':ro'), ('/var/cache/distfiles', '')):
+        assert (f'{default}:{default}{suffix}' in argv) == Path(default).is_dir()
+    assert not any(str(tmp_path / 'binpkgs') in item for item in argv)
+
+
+def test_build_run_argv_with_state_keeps_the_box(mocker: MockerFixture, tmp_path: Path) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n',
+                                                         distro='gentoo'),
+                                       state='claude-p-abc123')
+    assert '--rm' not in argv
+    assert f'{container.STATE_LABEL}=claude-p-abc123' in argv
+
+
+def test_gentoo_state_key() -> None:
+    key = container.gentoo_state_key(Path('/a/My Proj'), 'claude')
+    assert key.startswith('claude-My-Proj-')
+    assert key != container.gentoo_state_key(Path('/b/My Proj'), 'claude')
+    assert container.gentoo_state_key(Path('/a/My Proj'), 'opencode').startswith('opencode-')
+    assert len(container.gentoo_state_key(Path('/a') / ('x' * 300), 'claude')) <= 128
+
+
+def _state_client(mocker: MockerFixture,
+                  boxes: list[MagicMock] | None = None,
+                  saved: MagicMock | None = None) -> MagicMock:
+    client: MagicMock = mocker.MagicMock()
+    client.containers.list.return_value = boxes or []
+    if saved is None:
+        client.images.get.side_effect = docker.errors.ImageNotFound('none')
+    else:
+        client.images.get.return_value = saved
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    return client
+
+
+def _launch(popen: MagicMock) -> list[str]:
+    return next(
+        list(call[0][0]) for call in popen.call_args_list if call[0][0][:2] == ['docker', 'run'])
+
+
+def _capture_env_files(popen: MagicMock) -> list[tuple[Path, bytes, int]]:
+    # The file exists only while the box runs. Its path, contents, and mode are read at launch.
+    seen: list[tuple[Path, bytes, int]] = []
+    launch = popen.side_effect
+
+    def read_then_launch(args: list[str], *rest: object, **kwargs: object) -> object:
+        if mount := next((item for item in args if item.endswith(':/run/sbclaude/env:ro')), None):
+            env_file = Path(mount.split(':')[0])
+            seen.append((env_file, env_file.read_bytes(), env_file.stat().st_mode & 0o777))
+        return launch(args, *rest, **kwargs)
+
+    popen.side_effect = read_then_launch
+    return seen
+
+
+def test_run_gentoo_saves_the_box_and_keeps_the_environment_out_of_it(
+        docker_run: Callable[..., MagicMock], mocker: MockerFixture, tmp_path: Path) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    client = _state_client(mocker)
+    runtime = tmp_path / 'runtime'
+    runtime.mkdir()
+    mocker.patch.dict(os.environ, {
+        'GH_TOKEN': 'secret\nwith a newline',
+        'XDG_RUNTIME_DIR': str(runtime)
+    })
+    popen = docker_run(0)
+    seen = _capture_env_files(popen)
+    spec = container.RunSpec(project=project,
+                             name='n',
+                             distro='gentoo',
+                             env={'PLAIN': 'value'},
+                             extra_args=['-e', 'GH_TOKEN', '--env=FROM_ARGS=1'],
+                             claude_args=('-e', 'not-an-env-flag'))
+    assert container.run(spec) == 0
+    argv = _launch(popen)
+    image = argv.index('sbclaude-gentoo:latest')
+    # No environment arrives at docker run, where docker commit would copy it into the image. The
+    # agent's arguments after the image are unchanged.
+    assert '-e' not in argv[:image]
+    assert '--env=FROM_ARGS=1' not in argv
+    assert argv[image + 1:] == ['-e', 'not-an-env-flag']
+    (env_file, contents, mode), = seen
+    assert env_file.parent == runtime
+    entries = contents.split(b'\0')
+    assert b'PLAIN=value' in entries
+    assert b'GH_TOKEN=secret\nwith a newline' in entries
+    assert b'FROM_ARGS=1' in entries
+    assert b'HOST_UID=' + str(os.getuid()).encode() in entries
+    assert mode == 0o600
+    ctr = client.containers.get.return_value
+    ctr.commit.assert_called_once_with(repository=container.STATE_REPOSITORY,
+                                       tag=container.gentoo_state_key(project, 'claude'),
+                                       changes=['CMD []'])
+    ctr.remove.assert_called_once_with(force=True, v=True)
+    # The file is gone with the session.
+    assert not env_file.exists()
+
+
+def test_run_gentoo_removes_the_env_file_after_every_attempt(docker_run: Callable[..., MagicMock],
+                                                             mocker: MockerFixture,
+                                                             tmp_path: Path) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.syslog.syslog')
+    client = _state_client(mocker)
+    client.containers.get.side_effect = docker.errors.NotFound('gone')
+    runtime = tmp_path / 'runtime'
+    runtime.mkdir()
+    mocker.patch.dict(os.environ, {'XDG_RUNTIME_DIR': str(runtime)})
+    seen = _capture_env_files(docker_run(125))
+    container.run(container.RunSpec(project=project, name='n', distro='gentoo'))
+    assert len(seen) == 3
+    assert all(env_file.parent == runtime for env_file, _, _ in seen)
+    assert not any(runtime.iterdir())
+
+
+def test_run_gentoo_passes_a_keyring_secret_through_the_env_file_alone(
+        docker_run: Callable[..., MagicMock], mocker: MockerFixture, tmp_path: Path) -> None:
+    _, pkgdir, distdir, project = _gentoo_host(mocker, tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    _state_client(mocker)
+    mocker.patch.dict(os.environ, clear=False)
+
+    def run(args: list[str], *_: object, **__: object) -> sp.CompletedProcess[str]:
+        if args[0] == 'portageq':
+            return sp.CompletedProcess(args, 0, f'{pkgdir}\n{distdir}\n', '')
+        if list(args[1:3]) == ['lookup', 'service']:
+            return sp.CompletedProcess(args, 0, 'tok', '')
+        raise FileNotFoundError(args[0])
+
+    mocker.patch('sbclaude.container.sp.run', side_effect=run)
+    popen = docker_run(0)
+    seen = _capture_env_files(popen)
+    container.run(
+        container.RunSpec(project=project,
+                          name='n',
+                          distro='gentoo',
+                          keyring_keys=['GH_TOKEN=gh:github.com']))
+    argv = _launch(popen)
+    options = argv[:argv.index('sbclaude-gentoo:latest')]
+    assert not any('GH_TOKEN' in item or item == 'tok' for item in options)
+    assert '--env-file' not in options
+    assert b'GH_TOKEN=tok' in seen[0][1].split(b'\0')
+
+
+def test_run_gentoo_starts_from_the_state_it_just_rescued(docker_run: Callable[..., MagicMock],
+                                                          mocker: MockerFixture,
+                                                          tmp_path: Path) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    leftover = mocker.MagicMock()
+    leftover.status = 'exited'
+    saved: MagicMock = mocker.MagicMock()
+    saved.labels = {container.HASH_LABEL: _expected_hash({'Dockerfile'})}
+    saved.attrs = {'RootFS': {'Layers': ['x']}}
+    client = _state_client(mocker, boxes=[leftover])
+
+    # The saved image exists only once the leftover box has been committed.
+    def get(_tag: str) -> MagicMock:
+        if not leftover.commit.called:
+            msg = 'not yet'
+            raise docker.errors.ImageNotFound(msg)
+        return saved
+
+    client.images.get.side_effect = get
+    popen = docker_run(0)
+    container.run(container.RunSpec(project=project, name='n', distro='gentoo'))
+    key = container.gentoo_state_key(project, 'claude')
+    assert f'{container.STATE_REPOSITORY}:{key}' in _launch(popen)
+
+
+def test_run_gentoo_does_not_save_a_box_that_never_started(docker_run: Callable[..., MagicMock],
+                                                           mocker: MockerFixture,
+                                                           tmp_path: Path) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.syslog.syslog')
+    client = _state_client(mocker)
+    # The first attempt created a container that died at once; the others never got that far.
+    died = mocker.MagicMock()
+    client.containers.get.side_effect = [
+        died, docker.errors.NotFound('gone'),
+        docker.errors.NotFound('gone')
+    ]
+    docker_run(125)
+    assert container.run(container.RunSpec(project=project, name='n', distro='gentoo')) == 125
+    assert not died.commit.called
+    died.remove.assert_called_once_with(force=True, v=True)
+
+
+def test_run_gentoo_starts_from_the_saved_state(docker_run: Callable[..., MagicMock],
+                                                mocker: MockerFixture, tmp_path: Path,
+                                                capsys: pytest.CaptureFixture[str]) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    saved = mocker.MagicMock()
+    saved.labels = {container.HASH_LABEL: 'an-older-image'}
+    saved.attrs = {'RootFS': {'Layers': ['x'] * 101}}
+    _state_client(mocker, saved=saved)
+    popen = docker_run(0)
+    container.run(container.RunSpec(project=project, name='n', distro='gentoo'))
+    key = container.gentoo_state_key(project, 'claude')
+    assert f'{container.STATE_REPOSITORY}:{key}' in _launch(popen)
+    err = capsys.readouterr().err
+    assert 'sbclaude reset' in err
+    assert 'layer limit' in err
+
+
+def test_run_gentoo_starts_quietly_from_a_current_state(docker_run: Callable[..., MagicMock],
+                                                        mocker: MockerFixture, tmp_path: Path,
+                                                        capsys: pytest.CaptureFixture[str]) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    saved = mocker.MagicMock()
+    saved.labels = {container.HASH_LABEL: _expected_hash({'Dockerfile'})}
+    saved.attrs = {'RootFS': {'Layers': ['x'] * 3}}
+    _state_client(mocker, saved=saved)
+    docker_run(0)
+    container.run(container.RunSpec(project=project, name='n', distro='gentoo'))
+    assert 'sbclaude reset' not in capsys.readouterr().err
+
+
+def test_run_gentoo_saves_a_box_left_by_a_dead_session(docker_run: Callable[..., MagicMock],
+                                                       mocker: MockerFixture,
+                                                       tmp_path: Path) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    leftover = mocker.MagicMock()
+    leftover.status = 'exited'
+    _state_client(mocker, boxes=[leftover])
+    docker_run(0)
+    container.run(container.RunSpec(project=project, name='n', distro='gentoo'))
+    leftover.commit.assert_called_once_with(repository=container.STATE_REPOSITORY,
+                                            tag=container.gentoo_state_key(project, 'claude'),
+                                            changes=['CMD []'])
+    leftover.remove.assert_called_once_with(force=True, v=True)
+
+
+def test_run_gentoo_beside_a_running_box_is_not_saved(docker_run: Callable[..., MagicMock],
+                                                      mocker: MockerFixture, tmp_path: Path,
+                                                      capsys: pytest.CaptureFixture[str]) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    running = mocker.MagicMock()
+    running.status = 'running'
+    client = _state_client(mocker, boxes=[running])
+    popen = docker_run(0)
+    container.run(container.RunSpec(project=project, name='n', distro='gentoo'))
+    argv = _launch(popen)
+    assert '--rm' in argv
+    assert not running.commit.called
+    assert not client.containers.get.called
+    assert 'will not be saved' in capsys.readouterr().err
+
+
+def test_run_gentoo_with_an_image_override_is_not_saved(docker_run: Callable[..., MagicMock],
+                                                        mocker: MockerFixture,
+                                                        tmp_path: Path) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    from_env = mocker.patch('sbclaude.container.docker.from_env')
+    popen = docker_run(0)
+    container.run(
+        container.RunSpec(project=project, name='n', distro='gentoo', image='custom:latest'))
+    assert '--rm' in _launch(popen)
+    assert not from_env.called
+
+
+def test_env_file_skips_an_unset_bare_name(docker_run: Callable[..., MagicMock],
+                                           mocker: MockerFixture, tmp_path: Path) -> None:
+    _, _, _, project = _gentoo_host(mocker, tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    _state_client(mocker)
+    mocker.patch.dict(os.environ, clear=False)
+    os.environ.pop('SBCLAUDE_TEST_UNSET', None)
+    env_file = tmp_path / 'docker.env'
+    env_file.write_text('# a comment\n\nFROM_FILE=1\n')
+    seen = _capture_env_files(docker_run(0))
+    container.run(
+        container.RunSpec(project=project,
+                          name='n',
+                          distro='gentoo',
+                          extra_args=['-eSBCLAUDE_TEST_UNSET', '--env-file',
+                                      str(env_file)]))
+    entries = seen[0][1].split(b'\0')
+    assert b'FROM_FILE=1' in entries
+    assert not any(entry.startswith(b'SBCLAUDE_TEST_UNSET') for entry in entries)
+
+
+def test_stop_leaves_a_gentoo_box_to_be_saved(mocker: MockerFixture) -> None:
+    ctr = mocker.MagicMock()
+    ctr.name = 'n'
+    ctr.labels = {container.STATE_LABEL: 'claude-p-abc123'}
+    client = mocker.MagicMock()
+    client.containers.list.return_value = [ctr]
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    assert list(container.stop(project=Path('/p'))) == ['n']
+    ctr.stop.assert_called_once_with()
+    assert not ctr.remove.called
+
+
+def test_delete_state_for_a_project(mocker: MockerFixture) -> None:
+    client = mocker.MagicMock()
+    client.images.remove.side_effect = [None, docker.errors.ImageNotFound('x')]
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    project = Path('/p')
+    assert container.delete_state(project) == [
+        f'{container.STATE_REPOSITORY}:{container.gentoo_state_key(project, "claude")}'
+    ]
+
+
+def test_delete_state_everywhere(mocker: MockerFixture) -> None:
+    image = mocker.MagicMock()
+    image.tags = [f'{container.STATE_REPOSITORY}:claude-a-1', 'unrelated:latest']
+    client = mocker.MagicMock()
+    client.images.list.return_value = [image]
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    assert container.delete_state() == [f'{container.STATE_REPOSITORY}:claude-a-1']
+    client.images.list.assert_called_once_with(name=container.STATE_REPOSITORY)
+
+
+def _expected_hash(skip: Collection[str]) -> str:
+    # The expected value is the hash computed before a second Dockerfile existed, with the listed
+    # files excluded.
+    ctx = Path(container.__file__).parent / 'docker'
+    digest = hashlib.sha256()
+    for path in sorted(p for p in ctx.rglob('*') if p.is_file()):
+        relative = path.relative_to(ctx)
+        if relative.parts[0] in skip:
+            continue
+        digest.update(relative.as_posix().encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+@pytest.mark.parametrize(('tag', 'skip'), [('sbclaude:latest', {'Dockerfile.gentoo', 'gentoo'}),
+                                           ('sbclaude-gentoo:opencode', {'Dockerfile'})])
+def test_image_up_to_date_hashes_only_its_own_dockerfile(tag: str, skip: Collection[str],
+                                                         mocker: MockerFixture) -> None:
+    client = mocker.MagicMock()
+    client.images.get.return_value.labels = {container.HASH_LABEL: _expected_hash(skip)}
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    assert container.image_up_to_date(tag) is True
+
+
+def test_build_images_gentoo(mocker: MockerFixture) -> None:
+    client = mocker.MagicMock()
+    client.api.build.side_effect = lambda **_: iter([{'stream': 'ok\n'}])
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    lines = list(container.build_images(distro='gentoo', debian_mirror='http://m/debian'))
+    calls = client.api.build.call_args_list
+    assert [(call.kwargs['target'], call.kwargs['tag']) for call in calls] == list(
+        container.GENTOO_IMAGE_TAGS.items())
+    assert {call.kwargs['dockerfile'] for call in calls} == {'Dockerfile.gentoo'}
+    # The mirror is a Debian archive; the Gentoo build has no use for it.
+    assert {call.kwargs['buildargs'] for call in calls} == {None}
+    assert '==> Building sbclaude-gentoo:latest (Dockerfile.gentoo target claude)' in lines
+
+
+def test_ensure_image_builds_the_gentoo_images(mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.image_up_to_date', return_value=False)
+    mocker.patch('sbclaude.container.image_exists', return_value=False)
+    build = mocker.patch('sbclaude.container.build_images', return_value=iter([]))
+    container.ensure_image('sbclaude-gentoo:latest')
+    build.assert_called_once_with(debian_mirror=None, distro='gentoo')

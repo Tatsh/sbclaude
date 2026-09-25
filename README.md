@@ -32,8 +32,9 @@
 
 `sbclaude` runs **Claude Code** (or [opencode](#opencode)) inside a throwaway Docker container
 with the bash sandbox and permission prompts **disabled**, against a configurable set of host bind
-mounts. The container stores nothing (`--rm`); everything lives on the host. You only ever invoke
-`sbclaude`. It manages its own image and containers via the Docker SDK.
+mounts. The container stores nothing (`--rm`); everything lives on the host. A
+[Gentoo box](#gentoo-box---gentoo) is the exception, and is saved between sessions. You only ever
+invoke `sbclaude`. It manages its own image and containers via the Docker SDK.
 
 **The host must be Linux.** The host copy of `claude` is bind-mounted into a Linux container and
 executed there, so the host must supply an ELF build of it (a Mac's own `claude` is Mach-O and
@@ -127,7 +128,10 @@ sbclaude ls                       # list running sbclaude containers
 sbclaude stop [--all]             # stop this project's boxes (or all with --all)
 sbclaude shell                    # debug shell in this project's box, as your user
 sbclaude shell --root             # ... as root instead
+sbclaude run --gentoo             # Gentoo box for ebuild work, saved between sessions
 sbclaude build [--no-cache]       # (re)build the image
+sbclaude build --gentoo           # (re)build the Gentoo images
+sbclaude reset [--all]            # discard this project's saved Gentoo box (or every one)
 sbclaude delete-image             # remove the sbclaude image
 sbclaude config                   # show the config file path
 sbclaude scaffold-noclip [DIR]    # write a noclip visual-regression harness into a project
@@ -197,6 +201,7 @@ more than one is running).
 | `--ssh`             | mount the host `~/.ssh` read-only and forward the ssh-agent, for SSH git remotes |
 | `--gpg`             | mount the host GnuPG home + agent socket for signing commits                     |
 | `--sudo`            | passwordless `sudo` in the box (drops `no-new-privileges`)                       |
+| `--gentoo`          | Gentoo image for ebuild work, saved between sessions (implies `--sudo`)          |
 | `--venv-dir DIR`    | put the box's virtualenv in `DIR` (e.g. a volume) instead of beside the project  |
 | `--agent opencode`  | run opencode instead of claude (host `PATH`, or the latest release downloaded)   |
 | `--claude-binary`   | mount this `claude` build instead of the first one on `PATH`                     |
@@ -246,6 +251,7 @@ x11 = true       # forward X11 for GUI apps
 # venv_dir = "/venv-cache"        # hold the box's virtualenv here (pair with a docker_args volume)
 # claude_binary = "~/bin/claude"  # mount this claude build rather than the first one on PATH
 # agent = "opencode"              # run opencode instead of claude (same as --agent opencode)
+# gentoo = true                   # run the Gentoo image for ebuild work (same as --gentoo)
 # fullscreen = false              # do not force the fullscreen TUI (keeps start-up errors visible)
 keyring_keys = ["GH_TOKEN=gh:github.com"]          # copy only these host secrets in, as env vars
 pass_env = ["AWS_REGION"]                          # forward host vars (AWS_PROFILE is default)
@@ -256,9 +262,9 @@ rw = []                                            # the project dir is always r
 CLAUDE_CODE_USE_BEDROCK = "1"
 ```
 
-The toggle keys `re`, `ghidra`, `android`, `docker`, `gpu`, `usb`, `ios`, `keyring`, `wayland`,
-`x11`, `ssh`, `gpg`, and `sudo` mirror the matching `run` flags and default to `false`; setting a key
-is the same as always passing the matching flag.
+The toggle keys `re`, `ghidra`, `android`, `docker`, `gentoo`, `gpu`, `usb`, `ios`, `keyring`,
+`wayland`, `x11`, `ssh`, `gpg`, and `sudo` mirror the matching `run` flags and default to `false`;
+setting a key is the same as always passing the matching flag.
 
 ### Secrets
 
@@ -404,6 +410,87 @@ relocates with `XDG_CONFIG_HOME` or its siblings is mounted at the default path 
 For opencode, `~/.claude` is not mounted, `settings.json` is not patched, `--no-fullscreen` has no
 effect, and `--session-recover` is ignored with a note. The box runs `sbclaude:opencode`, an image
 without Claude Code's managed settings or cc-session-recover.
+
+## Gentoo box (`--gentoo`)
+
+`--gentoo` (config key `gentoo`) runs an image built from a Gentoo stage3, for editing ebuilds and
+testing their builds. It ships pkgcheck, pkgdev, gentoolkit, portage-utils, git, and sudo. The
+Debian image's RE toolchain, `webshot`, Qt, and Rust are absent, although their run flags still
+mount what they mount. `sbclaude build --gentoo` builds the image ahead of time, and the first
+`run --gentoo` builds it otherwise. The images are `sbclaude-gentoo:latest` and
+`sbclaude-gentoo:opencode`.
+
+emerge and ebuild run as root, and `--gentoo` therefore implies `--sudo`.
+
+```sh
+sbclaude run --gentoo -p ~/dev/my-overlay
+#   inside: pkgcheck scan
+#           pkgdev manifest
+#           sudo ebuild dev-libs/foo/foo-1.0.ebuild clean test
+#           sudo emerge --oneshot =dev-libs/foo-1.0
+```
+
+### Host Portage
+
+On a Gentoo host, the box receives the following from the host:
+
+- `/etc/portage`, copied into the box on its first start. The host's USE flags, CFLAGS, and profile
+  are what its binary packages were built with, and emerge only takes a binary package whose
+  settings match. After the copy, the box owns its configuration, and a change made in the box to
+  `package.use` or `package.accept_keywords` persists with the saved box.
+- `/var/db/repos`, read-only.
+- `PKGDIR`, read-only, with `--usepkg` added to `EMERGE_DEFAULT_OPTS`. Dependencies install from
+  the host's binary packages instead of compiling.
+- `DISTDIR`, read-write. A download made in the box is available to the host afterwards.
+
+`PKGDIR` and `DISTDIR` are the paths `portageq` reports on the host. On a host without Portage, the
+box uses the image's configuration and a repository snapshot taken when the image was built.
+
+The box registers the project as a repository when the project has `profiles/repo_name`. `emerge` and
+`ebuild` then build from the working tree, and a checkout of `gentoo.git` replaces the host's copy
+of the tree.
+
+The box turns off the four namespace sandboxes (`ipc-sandbox`, `mount-sandbox`, `network-sandbox`,
+and `pid-sandbox`). Each needs `CAP_SYS_ADMIN`, and the box does not have it. `sandbox`,
+`usersandbox`, and `userpriv` work as usual. `buildpkg` is off too, because `PKGDIR` is read-only.
+
+### Host packages with no binary package
+
+`sudo sbclaude-host-quickpkg ATOM...` packages an ebuild installed on the host that `PKGDIR` does
+not have, from the host's installed files, and installs it in the box. The host's `/usr` and
+`/var/db/pkg` are mounted read-only for this, and `quickpkg` reads each package's `CONTENTS` there.
+Only the requested packages are copied. Their dependencies must already be installed in the box or
+be requested in the same command. Files the host installed outside `/usr` (under `/etc`, for
+example) are not mounted and are not included.
+
+### Saved state
+
+A Gentoo box is not removed when its session ends. sbclaude commits its filesystem to
+`sbclaude-gentoo-state:<agent>-<project>-<digest>`, and the next Gentoo box for the same project
+and agent starts from that image. Packages emerged in one session are present in the next.
+
+The container's filesystem is saved, including `/usr`, `/var/db/pkg`, `/etc/portage`, and the
+parts of the box's home directory that are not mounted. Bind mounts (the project, `~/.claude`, and
+the host Portage directories) are not saved, and neither are `/tmp` (a tmpfs) and
+`/var/tmp/portage` (a volume removed with the box).
+
+`docker commit` copies a container's environment into the image it writes. A saved box therefore
+receives no `-e` at all. sbclaude writes the environment (including `--keyring-keys` secrets and
+`docker_args` entries) to a file readable by the user alone and mounts it at `/run/sbclaude/env`.
+The entrypoint and login shells export it, and the file is deleted when the session ends.
+
+- The next Gentoo box for the project saves a box that sbclaude could not save (the terminal
+  closed, or sbclaude was killed) before starting.
+- `sbclaude stop` stops a Gentoo box instead of removing it, and the stopped box is saved.
+- While one Gentoo box for a project is running, a second starts from the same state and is
+  discarded on exit, with a note.
+- `-i`/`image` turns saving off.
+- Each session adds one image layer. sbclaude warns past 100 layers, and when the Gentoo image was
+  rebuilt after the state was saved.
+
+`sbclaude reset` discards the project's saved state, and `sbclaude reset --all` discards every
+project's. The next box starts from the image again and copies the host's `/etc/portage` afresh.
+`sbclaude delete-image` does not remove saved state.
 
 ## MCP servers
 

@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from click.testing import CliRunner
     from pytest_mock import MockerFixture
 
+    from sbclaude.typing import Distro
+
 
 @pytest.mark.parametrize('platform', ['darwin', 'win32'])
 def test_main_refuses_a_non_linux_host(platform: str, runner: CliRunner, mocker: MockerFixture,
@@ -674,6 +676,65 @@ def test_delete_image(runner: CliRunner, mocker: MockerFixture) -> None:
 def test_delete_image_none(runner: CliRunner, mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.main.container.delete_images', return_value=[])
     assert 'No sbclaude images' in runner.invoke(main, ['delete-image']).output
+
+
+@pytest.mark.parametrize(('args', 'cfg'), [(['run', '--gentoo'], Config()),
+                                           (['run'], Config(gentoo=True))])
+def test_run_gentoo_implies_sudo(args: list[str], cfg: Config, runner: CliRunner,
+                                 mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=cfg)
+    runner.invoke(main, args)
+    spec = run.call_args[0][0]
+    assert spec.distro == 'gentoo'
+    assert spec.use_sudo
+
+
+def test_run_defaults_to_debian_without_sudo(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run'])
+    spec = run.call_args[0][0]
+    assert spec.distro == 'debian'
+    assert not spec.use_sudo
+
+
+@pytest.mark.parametrize(('args', 'distro'), [(['build'], 'debian'),
+                                              (['build', '--gentoo'], 'gentoo')])
+def test_build_distro(args: list[str], distro: Distro, runner: CliRunner,
+                      mocker: MockerFixture) -> None:
+    build = mocker.patch('sbclaude.main.container.build_images', return_value=iter([]))
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    assert runner.invoke(main, args).exit_code == 0
+    assert build.call_args.kwargs['distro'] == distro
+
+
+def test_reset_this_project(runner: CliRunner, mocker: MockerFixture, tmp_path: Path,
+                            monkeypatch: pytest.MonkeyPatch) -> None:
+    delete = mocker.patch('sbclaude.main.container.delete_state',
+                          return_value=['sbclaude-gentoo-state:claude-p-abc123'])
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(main, ['reset'])
+    assert 'Deleted: sbclaude-gentoo-state:claude-p-abc123' in result.output
+    delete.assert_called_once_with(tmp_path.resolve())
+
+
+def test_reset_resolves_the_project_option(runner: CliRunner, mocker: MockerFixture,
+                                           tmp_path: Path) -> None:
+    delete = mocker.patch('sbclaude.main.container.delete_state', return_value=[])
+    project = tmp_path / 'proj'
+    project.mkdir()
+    link = tmp_path / 'link'
+    link.symlink_to(project)
+    runner.invoke(main, ['reset', '-p', str(link)])
+    delete.assert_called_once_with(project.resolve())
+
+
+def test_reset_all(runner: CliRunner, mocker: MockerFixture) -> None:
+    delete = mocker.patch('sbclaude.main.container.delete_state', return_value=[])
+    result = runner.invoke(main, ['reset', '--all'])
+    assert 'No saved Gentoo state' in result.output
+    delete.assert_called_once_with(None)
 
 
 def test_scaffold_noclip(runner: CliRunner, mocker: MockerFixture, tmp_path: Path) -> None:

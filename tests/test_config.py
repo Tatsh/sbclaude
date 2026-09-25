@@ -46,10 +46,11 @@ def test_load_config_toggles(tmp_path: Path) -> None:
                     'ios = true\n'
                     'x11 = true\n'
                     'ssh = true\n'
-                    'gpg = true\n')
+                    'gpg = true\n'
+                    'gentoo = true\n')
     cfg = load_config(path)
     assert (cfg.ghidra, cfg.android, cfg.usb, cfg.ios) == (True, True, True, True)
-    assert (cfg.x11, cfg.ssh, cfg.gpg) == (True, True, True)
+    assert (cfg.x11, cfg.ssh, cfg.gpg, cfg.gentoo) == (True, True, True, True)
 
 
 def test_load_config_debian_mirror(tmp_path: Path) -> None:

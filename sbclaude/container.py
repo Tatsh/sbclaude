@@ -8,7 +8,7 @@ interactive TTY attach is unreliable; users still only ever invoke ``sbclaude``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from importlib import resources
 from pathlib import Path
 from shutil import which
@@ -36,18 +36,21 @@ from platformdirs import user_cache_path
 import docker
 import docker.errors
 
-from .typing import Agent
+from .typing import Agent, Distro
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
+    from docker.models.containers import Container
+
 log = logging.getLogger(__name__)
 
-__all__ = ('AGENTS', 'IMAGE_BASE', 'IMAGE_TAGS', 'LABEL', 'RunSpec', 'build_images', 'config_dir',
-           'default_name', 'delete_images', 'ensure_image', 'gpu_ready', 'image_exists',
-           'image_up_to_date', 'is_python_project', 'list_managed', 'opencode_binary',
-           'project_containers', 'run', 'shell', 'stop', 'transient_uv_project_environment',
-           'unique_name', 'uv_project_environment', 'uv_project_environment_in')
+__all__ = ('AGENTS', 'DISTRO_IMAGE_TAGS', 'GENTOO_IMAGE_TAGS', 'IMAGE_BASE', 'IMAGE_TAGS', 'LABEL',
+           'RunSpec', 'build_images', 'config_dir', 'default_name', 'delete_images', 'delete_state',
+           'ensure_image', 'gentoo_state_key', 'gpu_ready', 'image_exists', 'image_up_to_date',
+           'is_python_project', 'list_managed', 'opencode_binary', 'project_containers', 'run',
+           'shell', 'stop', 'transient_uv_project_environment', 'unique_name',
+           'uv_project_environment', 'uv_project_environment_in')
 
 AGENTS = get_args(Agent)
 """
@@ -72,6 +75,59 @@ cc-session-recover on top, and shares every other layer.
 
 :meta hide-value:
 """
+GENTOO_IMAGE_TAGS: dict[Agent, str] = {
+    'claude': 'sbclaude-gentoo:latest',
+    'opencode': 'sbclaude-gentoo:opencode'
+}
+"""
+Image tag for each agent on the Gentoo image, built from ``Dockerfile.gentoo``.
+
+:meta hide-value:
+"""
+DISTRO_IMAGE_TAGS: dict[Distro, dict[Agent, str]] = {
+    'debian': IMAGE_TAGS,
+    'gentoo': GENTOO_IMAGE_TAGS
+}
+"""
+Image tags for each distribution.
+
+:meta hide-value:
+"""
+_DOCKERFILES: dict[Distro, str] = {'debian': 'Dockerfile', 'gentoo': 'Dockerfile.gentoo'}
+"""
+Dockerfile each distribution is built from. Files under a directory with a distribution's title
+belong to the distribution alone.
+
+:meta hide-value:
+"""
+STATE_REPOSITORY = 'sbclaude-gentoo-state'
+"""Repository of the images that store a Gentoo box's filesystem between sessions."""
+STATE_LABEL = 'sbclaude.gentoo_state'
+"""Docker label recording which saved state a Gentoo box is committed to."""
+_STATE_LAYER_WARNING = 100
+"""
+Layer count above which a saved state is reported as due for a reset.
+
+Every session adds one layer, and overlay2 refuses an image of more than about 125.
+
+:meta hide-value:
+"""
+_LIVE_STATUSES = frozenset({'paused', 'restarting', 'running'})
+"""Container statuses of a box that has not finished its session."""
+HOST_PORTAGE_CONFIG = Path('/etc/portage')
+"""Host Portage configuration, copied into a Gentoo box once."""
+HOST_REPOSITORIES = Path('/var/db/repos')
+"""Host ebuild repositories, mounted read-only into a Gentoo box."""
+HOST_PACKAGE_DB = Path('/var/db/pkg')
+"""Host package database, read by ``sbclaude-host-quickpkg``."""
+_PORTAGE_DEFAULTS = (('PKGDIR', '/var/cache/binpkgs'), ('DISTDIR', '/var/cache/distfiles'))
+"""
+Portage directories a Gentoo box mounts, with the values used when ``portageq`` is absent.
+
+:meta hide-value:
+"""
+_HOST_ROOT = '/run/sbclaude/host-root'
+"""Directory in a Gentoo box under which the host's file tree is mounted read-only."""
 HARDENING_ARGS = ('--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE',
                   '--cap-add', 'FOWNER', '--cap-add', 'KILL', '--cap-add', 'SETUID', '--cap-add',
                   'SETGID', '--pids-limit', '4096')
@@ -250,6 +306,8 @@ class RunSpec:
     """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
     debian_mirror: str | None = None
     """Debian archive mirror for an auto-triggered image build, or ``None`` for the default."""
+    distro: Distro = 'debian'
+    """Distribution of the box's image. A Gentoo box is saved between sessions."""
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables injected into the box."""
     fullscreen: bool = True
@@ -670,7 +728,7 @@ def config_dir(home: Path) -> Path:
     return Path(override).expanduser() if override else home / '.claude'
 
 
-def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
+def build_run_argv(spec: RunSpec, *, state: str | None = None) -> tuple[list[str], Path | None]:
     """
     Build the ``docker run`` argv for an interactive agent session.
 
@@ -678,6 +736,10 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     ----------
     spec : RunSpec
         The resolved run description.
+    state : str | None
+        Saved-state key of a box that is committed when it exits, or ``None`` for a box that
+        Docker removes on exit. A box with a key is labelled with the key and is not removed when
+        it stops.
 
     Returns
     -------
@@ -687,7 +749,8 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     home = Path.home()
     cfg_dir = config_dir(home)
     uid, gid, user = os.getuid(), os.getgid(), getpass.getuser()
-    image = spec.image or IMAGE_TAGS[spec.agent]
+    image = spec.image or DISTRO_IMAGE_TAGS[spec.distro][spec.agent]
+    lifetime = ('--label', f'{STATE_LABEL}={state}') if state else ('--rm',)
     tty = ('-i', '-t') if (sys.stdin.isatty() and sys.stdout.isatty()) else ('-i',)
     # no-new-privileges is dropped for a --sudo box (and only then): with it set, the kernel
     # ignores sudo's setuid bit, so escalation is impossible however the box is configured.
@@ -695,7 +758,7 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     hardening = ((*no_new_privileges, *HARDENING_ARGS, *_resource_args(spec)) if spec.harden else
                  ())
     argv = [
-        'docker', 'run', '--rm', *tty, '--name', spec.name, *hardening, '--label', f'{LABEL}=1',
+        'docker', 'run', *lifetime, *tty, '--name', spec.name, *hardening, '--label', f'{LABEL}=1',
         '--label', f'{PROJECT_LABEL}={spec.project}', '--network', spec.network, '-e',
         f'HOST_UID={uid}', '-e', f'HOST_GID={gid}', '-e', f'HOST_USER={user}', '-e',
         f'HOST_HOME={home}', '-e', f'TERM={os.environ.get("TERM", "xterm-256color")}'
@@ -764,6 +827,7 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
         (bool(spec.keyring_keys), lambda: _keyring_secret_args(spec.keyring_keys)),
         (spec.use_wayland, lambda: _wayland_args(uid)),
         (spec.use_x11, lambda: _x11_args(uid, user)),
+        (spec.distro == 'gentoo', _gentoo_args),
     )
     for enabled, build_args in optional_args:
         if enabled:
@@ -789,6 +853,72 @@ def _opencode_args(home: Path) -> list[str]:
         host.mkdir(parents=True, exist_ok=True)
         args += _v(host, home / default / 'opencode')
     return args
+
+
+def _portage_dirs() -> dict[str, Path]:
+    # The directories are queried from the host's Portage rather than assumed, because make.conf may
+    # move either directory. The configuration copied into the box then lists the paths the mounts
+    # are made at.
+    names = [name for name, _ in _PORTAGE_DEFAULTS]
+    try:
+        # ruff: ignore[start-process-with-partial-path]
+        out = sp.run(['portageq', 'envvar', *names], capture_output=True, check=True,
+                     text=True).stdout.splitlines()
+    except (FileNotFoundError, sp.CalledProcessError):
+        out = []
+    if len(out) != len(names) or not all(out):
+        out = [value for _, value in _PORTAGE_DEFAULTS]
+    return {name: Path(value) for name, value in zip(names, out, strict=True)}
+
+
+def _gentoo_args() -> list[str]:
+    """
+    Mount what a Gentoo box needs from a Gentoo host.
+
+    The configuration is mounted at a staging path that the entrypoint copies from once, the
+    repositories and binary packages read-only, and the distfiles read-write. A download made in
+    the box is retained for the host. The host's ``/usr`` and package database are mounted
+    read-only under ``_HOST_ROOT`` for ``sbclaude-host-quickpkg``. A path the host does not have is
+    skipped, and the box falls back to the image's repository snapshot and an empty package
+    directory.
+
+    The packaged entrypoint is mounted over the image's copy. A saved state was committed from an
+    older image, and its entrypoint would otherwise never be updated. ``/tmp`` and the Portage build
+    directory are a tmpfs and a volume, and neither is committed with the state.
+
+    Returns
+    -------
+    list[str]
+        ``docker run`` arguments.
+    """
+    args: list[str] = []
+    if HOST_PORTAGE_CONFIG.is_dir():
+        args += _v(HOST_PORTAGE_CONFIG, '/run/sbclaude/host-portage', ro=True)
+    else:
+        log.warning('%s is not present on the host; the box uses the image configuration.',
+                    HOST_PORTAGE_CONFIG)
+    if HOST_REPOSITORIES.is_dir():
+        args += _v(HOST_REPOSITORIES, ro=True)
+    dirs = _portage_dirs()
+    for name, writable in (('PKGDIR', False), ('DISTDIR', True)):
+        if dirs[name].is_dir():
+            args += _v(dirs[name], ro=not writable)
+    # A merged-usr host has its /bin and siblings as links into /usr. The helper recreates them.
+    host_tree = (Path('/usr'), HOST_PACKAGE_DB,
+                 *(path for path in map(Path, ('/bin', '/lib', '/lib64', '/sbin'))
+                   if not path.is_symlink()))
+    for path in host_tree:
+        if path.is_dir():
+            args += _v(path, f'{_HOST_ROOT}{path}', ro=True)
+    entrypoint = Path(__file__).parent / 'docker' / 'entrypoint.sh'
+    return [
+        *args,
+        *_v(entrypoint, '/usr/local/bin/entrypoint.sh', ro=True),
+        '--tmpfs',
+        '/tmp:exec',  # ruff: ignore[hardcoded-temp-file]
+        '-v',
+        '/var/tmp/portage'  # ruff: ignore[hardcoded-temp-file]
+    ]
 
 
 def gpu_ready() -> bool:
@@ -1326,27 +1456,41 @@ def run(spec: RunSpec) -> int:
     int
         The container's exit code, from the last attempt made.
     """
-    image = spec.image or IMAGE_TAGS[spec.agent]
-    if image in IMAGE_TAGS.values():
+    image = spec.image or DISTRO_IMAGE_TAGS[spec.distro][spec.agent]
+    if _distro_of(image):
         ensure_image(
             image,
             log=lambda line: print(line, file=sys.stderr),  # ruff: ignore[print]
             debian_mirror=spec.debian_mirror)
+    state: str | None = None
+    if spec.distro == 'gentoo' and not spec.image:
+        state, spec = _resume_state(spec)
     if spec.use_gpg:
         _unlock_gpg_agent()
     code = 0
     for attempt in range(1, _LAUNCH_ATTEMPTS + 1):
         if attempt > 1:
             time.sleep(_LAUNCH_RETRY_SECONDS)
-        argv, cleanup = build_run_argv(spec)
+        argv, cleanup = build_run_argv(spec, state=state)
+        env_file: Path | None = None
+        if state:
+            # Everything after the image is the agent's arguments, and -e there is not a Docker
+            # option.
+            agent_args = len(spec.claude_args) + 1
+            options, env_file = _env_to_file(argv[:-agent_args])
+            argv = [*options, *argv[-agent_args:]]
         log.debug('Running: %s', shlex.join(argv))
         started = time.monotonic()
         try:
             code, stderr_tail = _run_relaying_stderr(argv)
         finally:
-            if cleanup is not None:
-                cleanup.unlink(missing_ok=True)
-        if not _failed_to_start(code, seconds := time.monotonic() - started):
+            for path in (cleanup, env_file):
+                if path is not None:
+                    path.unlink(missing_ok=True)
+        failed = _failed_to_start(code, seconds := time.monotonic() - started)
+        if state:
+            _save_state(spec.name, state, commit=not failed)
+        if not failed:
             return code
         _report_failure(code,
                         seconds,
@@ -1355,6 +1499,151 @@ def run(spec: RunSpec) -> int:
                         attempt=attempt,
                         fullscreen=spec.fullscreen and spec.agent == 'claude')
     return code
+
+
+def gentoo_state_key(project: Path, agent: Agent) -> str:
+    """
+    Derive the tag of a project's saved Gentoo state.
+
+    Each project and agent has one state. The digest of the absolute path prevents ``~/dev/foo`` and
+    ``~/work/foo`` from sharing one state, and the agent prefix makes the tag valid whatever the
+    project is titled.
+
+    Parameters
+    ----------
+    project : Path
+        The project directory.
+    agent : Agent
+        The agent the box runs.
+
+    Returns
+    -------
+    str
+        A Docker tag in the ``sbclaude-gentoo-state`` repository.
+    """
+    digest = hashlib.blake2b(str(project).encode(), digest_size=3).hexdigest()
+    return f'{agent}-{_NAME_SANITIZE.sub("-", project.name)}'[:120] + f'-{digest}'
+
+
+def _commit(ctr: Container, key: str) -> None:
+    # The saved image gets an empty CMD. Otherwise the arguments of the session that ended become
+    # the default of the next. The environment needs no reset, because a saved box receives none
+    # through docker run.
+    ctr.commit(repository=STATE_REPOSITORY, tag=key, changes=['CMD []'])
+
+
+def _resume_state(spec: RunSpec) -> tuple[str | None, RunSpec]:
+    """
+    Prepare a Gentoo box to start from, and be saved back to, its project's state.
+
+    A stopped box still labelled with the key belongs to a session whose sbclaude died before
+    saving it, and is committed now. When a box for the key is still running, the new box starts
+    from the same state but is not saved. The two boxes then never race to be the last commit.
+
+    Parameters
+    ----------
+    spec : RunSpec
+        The resolved run description.
+
+    Returns
+    -------
+    tuple[str | None, RunSpec]
+        The key to save to, or ``None`` for a box that is not saved, and the description with the
+        saved image selected when one exists.
+    """
+    key = gentoo_state_key(spec.project, spec.agent)
+    client = _client()
+    boxes = client.containers.list(all=True, filters={'label': f'{STATE_LABEL}={key}'})
+    save: str | None = key
+    if any(ctr.status in _LIVE_STATUSES for ctr in boxes):
+        sys.stderr.write("sbclaude: another box is using this project's saved Gentoo state; "
+                         'changes made in this box will not be saved\n')
+        save = None
+    else:
+        for ctr in boxes:
+            sys.stderr.write(f'sbclaude: saving {ctr.name}, abandoned by a session that did not '
+                             'end cleanly\n')
+            _commit(ctr, key)
+            ctr.remove(force=True, v=True)
+    try:
+        saved = client.images.get(f'{STATE_REPOSITORY}:{key}')
+    except docker.errors.ImageNotFound:
+        return save, spec
+    if (saved.labels or {}).get(HASH_LABEL) != _context_hash('gentoo'):
+        sys.stderr.write('sbclaude: the Gentoo image was updated after this state was saved; run '
+                         '`sbclaude reset` to start over from the new one\n')
+    if len((saved.attrs.get('RootFS') or {}).get('Layers') or []) > _STATE_LAYER_WARNING:
+        # ponytail: warn only; flatten with export and import if the layer warning ever fires.
+        sys.stderr.write('sbclaude: this saved state is close to the layer limit of the storage '
+                         'driver; run `sbclaude reset` soon\n')
+    return save, replace(spec, image=f'{STATE_REPOSITORY}:{key}')
+
+
+def _save_state(name: str, key: str, *, commit: bool) -> None:
+    # A box that never started is removed without saving. Its saved state does not change.
+    try:
+        ctr = _client().containers.get(name)
+    except docker.errors.NotFound:
+        return
+    if commit:
+        _commit(ctr, key)
+    # The anonymous volume (the Portage build directory) is removed with the box.
+    ctr.remove(force=True, v=True)
+
+
+def _env_to_file(options: Sequence[str]) -> tuple[list[str], Path]:
+    """
+    Move every environment variable out of ``docker run`` options and into a mounted file.
+
+    ``docker commit`` copies the container's environment into the image it saves, secrets included.
+    A box that is saved therefore receives its environment as a file for the entrypoint to export.
+    Entries are NUL-separated, and a value may include a newline. The bind mount is not committed.
+
+    A bare ``-e NAME`` takes its value from this process's environment, as Docker would, and is
+    dropped when the variable is unset.
+
+    Parameters
+    ----------
+    options : Sequence[str]
+        ``docker run`` arguments up to, and not including, the image.
+
+    Returns
+    -------
+    tuple[list[str], Path]
+        The options with the environment replaced by the mount, and the file for the caller to
+        delete. The file is readable by this user alone.
+    """
+    kept: list[str] = []
+    values: list[str] = []
+    items = iter(options)
+    for item in items:
+        match item:
+            case '-e' | '--env':
+                values.append(next(items))
+            case '--env-file':
+                values += [
+                    line for line in Path(next(items)).read_text(encoding='utf-8').splitlines()
+                    if line.strip() and not line.lstrip().startswith('#')
+                ]
+            case _ if item.startswith('--env='):
+                values.append(item.removeprefix('--env='))
+            case _ if item.startswith('-e'):
+                values.append(item.removeprefix('-e'))
+            case _:
+                kept.append(item)
+    entries: list[str] = []
+    for value in values:
+        name, sep, _ = value.partition('=')
+        if sep:
+            entries.append(value)
+        elif name in os.environ:
+            entries.append(f'{name}={os.environ[name]}')
+    runtime = os.environ.get('XDG_RUNTIME_DIR')
+    fd, path = tempfile.mkstemp(prefix='sbclaude-env.',
+                                dir=runtime if runtime and Path(runtime).is_dir() else None)
+    with os.fdopen(fd, 'wb') as handle:
+        handle.write(b''.join(f'{entry}\0'.encode() for entry in entries))
+    return [*kept, *_v(path, '/run/sbclaude/env', ro=True)], Path(path)
 
 
 def _box_env(name: str) -> dict[str, str]:
@@ -1416,17 +1705,29 @@ def _client() -> docker.DockerClient:
     return docker.from_env()
 
 
-def _dir_hash(ctx: Path) -> str:
+def _dir_hash(ctx: Path, distro: Distro) -> str:
+    # Another distribution's Dockerfile and directory are excluded. Editing one image then does not
+    # rebuild the other.
+    others = {other for other in _DOCKERFILES if other != distro}
+    foreign = {_DOCKERFILES[other] for other in others} | others
     digest = hashlib.sha256()
     for path in sorted(p for p in ctx.rglob('*') if p.is_file()):
-        digest.update(path.relative_to(ctx).as_posix().encode())
+        relative = path.relative_to(ctx)
+        if relative.parts[0] in foreign:
+            continue
+        digest.update(relative.as_posix().encode())
         digest.update(path.read_bytes())
     return digest.hexdigest()
 
 
-def _context_hash() -> str:
+def _context_hash(distro: Distro) -> str:
     with resources.as_file(resources.files('sbclaude') / 'docker') as ctx:
-        return _dir_hash(Path(ctx))
+        return _dir_hash(Path(ctx), distro)
+
+
+def _distro_of(tag: str) -> Distro | None:
+    return next((distro for distro, tags in DISTRO_IMAGE_TAGS.items() if tag in tags.values()),
+                None)
 
 
 def image_exists(tag: str) -> bool:
@@ -1469,12 +1770,15 @@ def image_up_to_date(tag: str) -> bool:
         image = _client().images.get(tag)
     except docker.errors.ImageNotFound:
         return False
-    return (image.labels or {}).get(HASH_LABEL) == _context_hash()
+    return (image.labels or {}).get(HASH_LABEL) == _context_hash(_distro_of(tag) or 'debian')
 
 
 def delete_images() -> list[str]:
     """
     Delete the sbclaude images.
+
+    Saved Gentoo state is a separate image and is not deleted here. :py:func:`delete_state`
+    deletes saved state.
 
     Returns
     -------
@@ -1483,7 +1787,39 @@ def delete_images() -> list[str]:
     """
     client = _client()
     removed: list[str] = []
-    for tag in IMAGE_TAGS.values():
+    for tag in (tag for tags in DISTRO_IMAGE_TAGS.values() for tag in tags.values()):
+        try:
+            client.images.remove(tag, force=True)
+        except docker.errors.ImageNotFound:
+            continue
+        removed.append(tag)
+    return removed
+
+
+def delete_state(project: Path | None = None) -> list[str]:
+    """
+    Delete saved Gentoo state. The next Gentoo box then starts from the image.
+
+    Parameters
+    ----------
+    project : Path | None
+        Delete this project's state for every agent, or every saved state when ``None``.
+
+    Returns
+    -------
+    list[str]
+        Tags that were removed (a missing one is ignored).
+    """
+    client = _client()
+    if project is None:
+        tags = [
+            tag for image in client.images.list(name=STATE_REPOSITORY) for tag in image.tags
+            if tag.startswith(f'{STATE_REPOSITORY}:')
+        ]
+    else:
+        tags = [f'{STATE_REPOSITORY}:{gentoo_state_key(project, agent)}' for agent in AGENTS]
+    removed: list[str] = []
+    for tag in tags:
         try:
             client.images.remove(tag, force=True)
         except docker.errors.ImageNotFound:
@@ -1502,8 +1838,8 @@ def ensure_image(image: str,
     Parameters
     ----------
     image : str
-        The image tag to ensure. Only the sbclaude images are auto-built, and a build produces all
-        of them.
+        The image tag to ensure. Only the sbclaude images are auto-built, and a build produces
+        every agent's image for the distribution of the requested image.
     log : Callable[[str], None]
         Sink for build log lines.
     debian_mirror : str | None
@@ -1514,12 +1850,12 @@ def ensure_image(image: str,
     docker.errors.BuildError
         If the build fails and no usable image is already tagged.
     """
-    if image not in IMAGE_TAGS.values() or image_up_to_date(image):
+    if not (distro := _distro_of(image)) or image_up_to_date(image):
         return
     existing = image_exists(image)
     log(f'Image {image} {"rebuilding (Dockerfile changed)" if existing else "building"}...')
     try:
-        for line in build_images(debian_mirror=debian_mirror):
+        for line in build_images(debian_mirror=debian_mirror, distro=distro):
             log(line)
     except docker.errors.BuildError as e:
         # A failed first build leaves nothing to run, so it is fatal. A failed rebuild is not:
@@ -1604,15 +1940,24 @@ def stop(name: str | None = None, project: Path | None = None) -> Iterator[str]:
     else:
         targets = client.containers.list(all=True, filters={'label': f'{LABEL}=1'})
     for ctr in targets:
-        ctr.remove(force=True)
+        if STATE_LABEL in (ctr.labels or {}):
+            # The box is stopped rather than removed. Its session then saves it on the way out, or
+            # the next Gentoo box for the project saves it when the original session is gone.
+            ctr.stop()
+        else:
+            ctr.remove(force=True)
         yield ctr.name or ''
 
 
-def build_images(*, no_cache: bool = False, debian_mirror: str | None = None) -> Iterator[str]:
+def build_images(*,
+                 no_cache: bool = False,
+                 debian_mirror: str | None = None,
+                 distro: Distro = 'debian') -> Iterator[str]:
     """
-    Build the sbclaude image for every agent, yielding log lines.
+    Build the sbclaude image of one distribution for every agent, yielding log lines.
 
-    Each image is a target of the same Dockerfile. After the first, the build reuses the shared
+    Each image is a target of the distribution's Dockerfile. After the first, the build reuses the
+    shared
     base layers from the cache.
 
     Parameters
@@ -1620,7 +1965,9 @@ def build_images(*, no_cache: bool = False, debian_mirror: str | None = None) ->
     no_cache : bool
         Disable the build cache.
     debian_mirror : str | None
-        Debian archive mirror to bake into the image's apt sources.
+        Debian archive mirror to bake into the image's apt sources. The Gentoo image ignores it.
+    distro : Distro
+        Distribution whose images are built.
 
     Yields
     ------
@@ -1634,13 +1981,14 @@ def build_images(*, no_cache: bool = False, debian_mirror: str | None = None) ->
     """
     client = _client()
     mirror = debian_mirror.rstrip('/') if debian_mirror else None
+    dockerfile = _DOCKERFILES[distro]
     with resources.as_file(resources.files('sbclaude') / 'docker') as ctx:
-        labels = {HASH_LABEL: _dir_hash(Path(ctx))}
-        buildargs = {'DEBIAN_MIRROR': mirror} if mirror else None
-        for agent, tag in IMAGE_TAGS.items():
-            yield f'==> Building {tag} (Dockerfile target {agent})'
+        labels = {HASH_LABEL: _dir_hash(Path(ctx), distro)}
+        buildargs = {'DEBIAN_MIRROR': mirror} if mirror and distro == 'debian' else None
+        for agent, tag in DISTRO_IMAGE_TAGS[distro].items():
+            yield f'==> Building {tag} ({dockerfile} target {agent})'
             for chunk in client.api.build(path=str(ctx),
-                                          dockerfile='Dockerfile',
+                                          dockerfile=dockerfile,
                                           target=agent,
                                           tag=tag,
                                           nocache=no_cache,

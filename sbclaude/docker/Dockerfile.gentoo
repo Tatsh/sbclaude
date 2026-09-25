@@ -1,0 +1,68 @@
+# The sbclaude image for ebuild work provides a Gentoo box in which the agent edits ebuilds and
+# tests their builds.
+# The agent binary is NOT installed here. It is bind-mounted from the host at run time, as in the
+# Debian image. The host's Portage configuration, repositories, binary packages, and distfiles are
+# bind-mounted too, and the entrypoint copies the configuration in once.
+FROM gentoo/portage:latest AS portage
+
+FROM gentoo/stage3:latest AS base
+
+LABEL org.opencontainers.image.description="Claude Code container for Gentoo ebuild work (no sandbox, no prompts)." \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.source="https://github.com/Tatsh/sbclaude" \
+      org.opencontainers.image.title="sbclaude-gentoo"
+
+# The image includes a repository snapshot for a host that has none. A host's /var/db/repos is
+# mounted over the snapshot at run time.
+COPY --from=portage /var/db/repos/gentoo /var/db/repos/gentoo
+# The four namespace sandboxes call unshare(). unshare() needs CAP_SYS_ADMIN, and neither a build
+# nor a box has it. The sandbox, usersandbox, and userpriv features need only the capabilities the
+# box retains. Tools come from the official binary host that the stage3 configures.
+RUN printf '%s\n' \
+        'FEATURES="${FEATURES} -ipc-sandbox -mount-sandbox -network-sandbox -pid-sandbox"' \
+        >> /etc/portage/make.conf \
+    && emerge --getbinpkg --jobs=4 --noreplace --quiet \
+        app-admin/sudo \
+        app-misc/jq \
+        app-portage/gentoolkit \
+        app-portage/portage-utils \
+        dev-util/pkgcheck \
+        dev-util/pkgdev \
+        dev-vcs/git \
+        net-misc/openssh \
+        sys-process/tini \
+    && rm -rf /var/cache/binpkgs/* /var/cache/distfiles/* \
+    && ln -s "$(command -v tini)" /usr/local/bin/tini
+COPY --from=tianon/gosu /gosu /usr/local/bin/gosu
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+COPY gentoo/sbclaude-host-quickpkg gentoo/profile-env.sh /tmp/sbclaude/
+# Mode 755 is set rather than +x, as in the Debian image. A file checked out 750 would otherwise be
+# unreadable by the container user.
+RUN install -m 0755 /tmp/sbclaude/sbclaude-host-quickpkg /usr/local/bin/sbclaude-host-quickpkg \
+    && install -m 0644 /tmp/sbclaude/profile-env.sh /etc/profile.d/sbclaude-env.sh \
+    && rm -rf /tmp/sbclaude
+ENV LANG=C.UTF-8
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 755 /usr/local/bin/entrypoint.sh
+# Strip every setuid/setgid bit, sudo's included. The entrypoint restores it on sudo alone.
+RUN find / -xdev -type f -perm /6000 -exec chmod a-s {} + 2>/dev/null || true
+ENTRYPOINT ["/usr/local/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+
+FROM base AS opencode
+
+# The claude stage is for Claude Code only and comes last to be the default target, as in the
+# Debian image.
+FROM base AS claude
+ENV DISABLE_AUTOUPDATER=1
+RUN mkdir -p /etc/claude-code
+COPY managed-settings.json /etc/claude-code/managed-settings.json
+RUN chmod 0644 /etc/claude-code/managed-settings.json
+# Install cc-session-recover with the patch from PR #2.
+# https://github.com/softcane/cc-session-recover/pull/2
+RUN git clone https://github.com/softcane/cc-session-recover.git /opt/cc-session-recover \
+    && cd /opt/cc-session-recover \
+    && git fetch origin pull/2/head:pr2 \
+    && { git diff main...pr2 | git apply --3way; } || true \
+    && sed -i 's#^GITIGNORE=.*#GITIGNORE=/dev/null#' scripts/install-into-project.sh \
+    && sed -i '/settings\.example\.json" "\$TARGET/d' scripts/install-into-project.sh \
+    && rm -rf .git

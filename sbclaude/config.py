@@ -100,6 +100,12 @@ class Config:
     Turning it off keeps a claude that fails on start from erasing its own error message with the
     terminal's alternate screen.
     """
+    gentoo: bool = False
+    """
+    Whether to run the Gentoo image, for ebuild work, instead of the Debian one.
+
+    A Gentoo box is saved between sessions and always has passwordless ``sudo``.
+    """
     ghidra: bool = False
     """Whether to mount the host Ghidra installation read-only."""
     gpg: bool = False
@@ -234,6 +240,7 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   docker_args=_str_list(data.get('docker_args')),
                   env=_str_dict(data.get('env')),
                   fullscreen=bool(data.get('fullscreen', True)),
+                  gentoo=bool(data.get('gentoo', False)),
                   ghidra=bool(data.get('ghidra', False)),
                   gpg=bool(data.get('gpg', False)),
                   gpu=bool(data.get('gpu', False)),

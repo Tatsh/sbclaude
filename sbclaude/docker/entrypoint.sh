@@ -11,6 +11,15 @@
 #      container, so host paths "just work".
 set -euo pipefail
 
+# A box whose filesystem is saved when it exits receives its environment in this file rather than
+# through docker run -e, because docker commit copies the container's environment into the saved
+# image along with every secret in it. Entries are NUL-separated, and a value may include a newline.
+if [ -f /run/sbclaude/env ]; then
+    while IFS= read -r -d '' _kv; do
+        export "${_kv?}"
+    done < /run/sbclaude/env
+fi
+
 : "${HOST_UID:=1000}"
 : "${HOST_GID:=1000}"
 : "${HOST_USER:=claude}"
@@ -56,6 +65,50 @@ for _gid in $(id -G); do
     fi
 done
 
+# In the Gentoo image, the box's filesystem is saved between sessions. Each step here therefore
+# runs at most once or rewrites its output rather than appending to it again.
+if command -v emerge >/dev/null 2>&1; then
+    # Seed the configuration from the host once. The host's USE flags, CFLAGS, and profile are what
+    # its binary packages were built with, and emerge only takes a binary package whose settings
+    # match. After seeding, the saved box owns its configuration. A change the agent makes
+    # survives, and `sbclaude reset` discards the seeded configuration and the agent's changes.
+    if [ -d /run/sbclaude/host-portage ] && [ ! -e /var/lib/sbclaude/portage-seeded ]; then
+        rm -rf /etc/portage
+        cp -a /run/sbclaude/host-portage /etc/portage
+        mkdir -p /var/lib/sbclaude
+        : > /var/lib/sbclaude/portage-seeded
+    fi
+    # The namespace sandboxes need CAP_SYS_ADMIN, and the box does not have it. The host's PKGDIR
+    # is mounted read-only, and a binary package cannot be written back to it.
+    make_conf=/etc/portage/make.conf
+    if [ -d "$make_conf" ]; then
+        make_conf=$make_conf/zz-sbclaude.conf
+    fi
+    if ! grep -qsx '# sbclaude' "$make_conf"; then
+        # shellcheck disable=SC2016
+        printf '%s\n' '# sbclaude' \
+            'FEATURES="${FEATURES} -buildpkg -ipc-sandbox -mount-sandbox -network-sandbox -pid-sandbox"' \
+            'EMERGE_DEFAULT_OPTS="${EMERGE_DEFAULT_OPTS} --usepkg"' >> "$make_conf"
+    fi
+    # Register the project as a repository when it is one. emerge and ebuild then resolve its
+    # packages from the working tree. Portage merges sections of the same title across files, and
+    # the last file read wins. A checkout of an existing repository (gentoo.git included)
+    # therefore replaces the existing repository's location.
+    if [ -f "$PWD/profiles/repo_name" ]; then
+        repos_conf=/etc/portage/repos.conf
+        if [ -f "$repos_conf" ]; then
+            mv "$repos_conf" "$repos_conf.sbclaude"
+            mkdir "$repos_conf"
+            mv "$repos_conf.sbclaude" "$repos_conf/00-host.conf"
+        fi
+        mkdir -p "$repos_conf"
+        printf '[%s]\nlocation = %s\n' "$(head -n 1 "$PWD/profiles/repo_name")" "$PWD" \
+            > "$repos_conf/zz-sbclaude-project.conf"
+    fi
+    # The host's DISTDIR is group-writable by portage, and pkgdev manifest writes to it.
+    usermod -aG portage "$USER_NAME" >/dev/null 2>&1 || true
+fi
+
 # Passwordless sudo for the mapped user, when sbclaude was started with --sudo.
 #
 # Opt-in, because the box is a no-prompt autonomous agent: whether it can reach container root is
@@ -85,6 +138,12 @@ if [ "${SBCLAUDE_SUDO:-0}" = "1" ]; then
         if grep -qs '^NoNewPrivs:[[:space:]]*1' /proc/self/status; then
             echo 'sbclaude: no_new_privs is set for this container, so sudo cannot escalate.' >&2
         fi
+    fi
+else
+    # A box whose filesystem is saved may have had sudo enabled in an earlier session.
+    rm -f /etc/sudoers.d/sbclaude
+    if SUDO_BIN=$(command -v sudo); then
+        chmod u-s "$SUDO_BIN" 2>/dev/null || true
     fi
 fi
 
