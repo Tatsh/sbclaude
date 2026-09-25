@@ -386,6 +386,30 @@ def test_run_unlocks_the_gpg_agent_from_the_terminal(docker_run: Callable[..., M
                if call[0] and call[0][0][0].startswith('/usr/bin/gpg'))
 
 
+def test_run_reports_a_gpg_key_it_cannot_unlock(capsys: pytest.CaptureFixture[str],
+                                                docker_run: Callable[..., MagicMock],
+                                                mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which',
+                 side_effect=lambda name: None
+                 if name == 'gpg-connect-agent' else f'/usr/bin/{name}')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.ensure_image')
+    mocker.patch('sbclaude.container.syslog.syslog')
+    mocker.patch('sbclaude.container.sys.stdin.isatty', return_value=True)
+    mocker.patch('sbclaude.container.sys.stdin.fileno', return_value=0)
+    mocker.patch('sbclaude.container.os.ttyname', return_value='/dev/pts/7')
+    run = mocker.patch('sbclaude.container.sp.run')
+    run.return_value.returncode = 2
+    run.return_value.stdout = ''
+    docker_run([0])
+    project = tmp_path / 'p'
+    project.mkdir()
+    container.run(container.RunSpec(project=project, name='n', use_gpg=True))
+    commands = [call[0][0] for call in run.call_args_list if call[0]]
+    assert not any('updatestartuptty' in command for command in commands)
+    assert 'could not unlock the signing key' in capsys.readouterr().err
+
+
 def test_run_skips_the_gpg_unlock_without_a_terminal(docker_run: Callable[..., MagicMock],
                                                      mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', side_effect=lambda name: f'/usr/bin/{name}')
