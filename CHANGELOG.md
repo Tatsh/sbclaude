@@ -14,7 +14,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `--agent opencode` (config key `agent`) runs opencode in the box instead of Claude Code. The host
   `opencode` on `PATH` is mounted, or the latest release is downloaded into the sbclaude cache when
   `PATH` has none. Every tool is allowed through `OPENCODE_PERMISSION`. opencode's XDG directories
-  are mounted read-write, and credentials and sessions made in the box persist on the host.
+  are mounted read-write, and credentials and sessions made in the box persist on the host. An
+  opencode box runs `sbclaude:opencode`, built from the same Dockerfile without the Claude Code
+  managed settings and cc-session-recover. `sbclaude build` and `sbclaude delete-image` handle both
+  images.
 - `--docker` (config key `docker`) forwards the host Docker daemon socket into the box, and the
   image now ships the Docker CLI with the buildx and compose plugins. The socket is taken from a
   `unix://` `DOCKER_HOST` or `/var/run/docker.sock`. Control of the daemon is root on the host

@@ -1445,7 +1445,7 @@ def test_delete_images(mocker: MockerFixture) -> None:
     client = mocker.MagicMock()
     client.images.remove.return_value = None
     mocker.patch('sbclaude.container.docker.from_env', return_value=client)
-    assert container.delete_images() == [container.IMAGE_BASE]
+    assert container.delete_images() == list(container.IMAGE_TAGS.values())
 
 
 def test_delete_images_absent(mocker: MockerFixture) -> None:
@@ -1922,3 +1922,37 @@ def test_run_does_not_blame_the_tui_for_opencode(capsys: pytest.CaptureFixture[s
     err = capsys.readouterr().err
     assert 'exited with 1' in err
     assert '--no-fullscreen' not in err
+
+
+def test_build_images_builds_every_agent_target(mocker: MockerFixture) -> None:
+    client = mocker.MagicMock()
+    client.api.build.side_effect = lambda **_: iter([{'stream': 'ok\n'}])
+    mocker.patch('sbclaude.container.docker.from_env', return_value=client)
+    lines = list(container.build_images())
+    built = [(call.kwargs['target'], call.kwargs['tag'])
+             for call in client.api.build.call_args_list]
+    assert built == list(container.IMAGE_TAGS.items())
+    assert '==> Building sbclaude:opencode (Dockerfile target opencode)' in lines
+
+
+def test_run_opencode_uses_its_own_image(docker_run: Callable[..., MagicMock],
+                                         mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/opencode')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    ensure = mocker.patch('sbclaude.container.ensure_image')
+    popen = docker_run(0)
+    project = tmp_path / 'p'
+    project.mkdir()
+    container.run(container.RunSpec(project=project, name='n', agent='opencode'))
+    assert ensure.call_args[0][0] == 'sbclaude:opencode'
+    launch = next(
+        call[0][0] for call in popen.call_args_list if call[0][0][:2] == ['docker', 'run'])
+    assert launch[-1] == 'sbclaude:opencode'
+
+
+def test_ensure_image_ignores_an_unmanaged_image(mocker: MockerFixture) -> None:
+    up_to_date = mocker.patch('sbclaude.container.image_up_to_date')
+    build = mocker.patch('sbclaude.container.build_images')
+    container.ensure_image('custom:latest')
+    up_to_date.assert_not_called()
+    build.assert_not_called()

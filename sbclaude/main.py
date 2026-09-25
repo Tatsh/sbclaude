@@ -451,7 +451,7 @@ def shell(name: str | None, *, as_root: bool) -> None:
               'http://ftp.us.debian.org/debian.')
 def build(debian_mirror: str | None, *, no_cache: bool) -> None:
     # ruff: ignore[docstring-missing-exception]
-    """Build the sbclaude Docker image from the packaged Dockerfile."""
+    """Build the sbclaude Docker images (one per agent) from the packaged Dockerfile."""
     mirror = debian_mirror or load_config().debian_mirror
     try:
         for line in container.build_images(no_cache=no_cache, debian_mirror=mirror):

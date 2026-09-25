@@ -45,7 +45,9 @@ refusal can be lifted for a host you are prepared to set up by hand — see
 [Running from a non-Linux host](#running-from-a-non-linux-host) — but nothing beyond Linux is
 tested or supported.
 
-There is a single image, `sbclaude`, built on demand. It bundles everyday coding tools
+Two images are built on demand from one Dockerfile. `sbclaude:latest` runs Claude Code and
+`sbclaude:opencode` runs opencode. They share every layer except the last, where the Claude Code
+image adds its managed settings and cc-session-recover. Both bundle everyday coding tools
 (Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv, jq), formatters and
 linters kept at their latest upstream release (clang-format, jsonnet, jsonnetfmt, shellcheck), Qt 6
 development (`qt6-base-dev` plus ninja), a Rust toolchain (rustup stable with the
@@ -400,7 +402,8 @@ sign-in made in the box with `opencode auth login` persists on the host. A direc
 relocates with `XDG_CONFIG_HOME` or its siblings is mounted at the default path inside the box.
 
 For opencode, `~/.claude` is not mounted, `settings.json` is not patched, `--no-fullscreen` has no
-effect, and `--session-recover` is ignored with a note.
+effect, and `--session-recover` is ignored with a note. The box runs `sbclaude:opencode`, an image
+without Claude Code's managed settings or cc-session-recover.
 
 ## MCP servers
 

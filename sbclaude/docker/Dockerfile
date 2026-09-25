@@ -2,7 +2,7 @@
 # and no permission prompts against host-mounted paths.
 # The `claude` executable is NOT installed here. It is bind-mounted from the host at run time.
 # Base must be glibc (the binary needs GLIBC_2.17+). Alpine/musl will not work.
-FROM debian:trixie-slim
+FROM debian:trixie-slim AS base
 
 LABEL org.opencontainers.image.description="Throwaway Claude Code container (no sandbox, no prompts)." \
       org.opencontainers.image.licenses="MIT" \
@@ -78,15 +78,6 @@ RUN set -eux; \
     tar -xzf /tmp/glab.tar.gz -C /tmp bin/glab; \
     install -m 0755 /tmp/bin/glab /usr/local/bin/glab; \
     rm -rf /tmp/glab.tar.gz /tmp/bin
-# cc-session-recover with a patch.
-# https://github.com/softcane/cc-session-recover/pull/2
-RUN git clone https://github.com/softcane/cc-session-recover.git /opt/cc-session-recover \
-    && cd /opt/cc-session-recover \
-    && git fetch origin pull/2/head:pr2 \
-    && { git diff main...pr2 | git apply --3way; } || true \
-    && sed -i 's#^GITIGNORE=.*#GITIGNORE=/dev/null#' scripts/install-into-project.sh \
-    && sed -i '/settings\.example\.json" "\$TARGET/d' scripts/install-into-project.sh \
-    && rm -rf .git
 # Reverse-engineering tools.
 RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
         -o /etc/apt/keyrings/adoptium.asc \
@@ -231,18 +222,9 @@ ENV PATH=/opt/venv/bin:/usr/lib/jvm/temurin-21-jdk-amd64/bin:/opt/cargo/bin:/opt
     GHIDRA_INSTALL_DIR=/usr/share/ghidra \
     LANG=en_GB.UTF-8 \
     LC_ALL=en_GB.UTF-8 \
-    LANGUAGE=en_GB:en \
-    DISABLE_AUTOUPDATER=1
+    LANGUAGE=en_GB:en
 # uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
-# Force the bash sandbox off regardless of the mounted user settings.json.
-# Managed settings are the highest-precedence layer, so this wins over
-# (and does not modify) the user's ~/.claude/settings.json.
-RUN mkdir -p /etc/claude-code
-COPY managed-settings.json /etc/claude-code/managed-settings.json
-# Claude will abort if these are not world-readable.
-RUN chmod 0644 /etc/claude-code/managed-settings.json
-
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 # Strip every setuid/setgid bit, sudo's included. Removes setuid-root escalation paths.
@@ -251,3 +233,27 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 RUN find / -xdev -type f -perm /6000 -exec chmod a-s {} + 2>/dev/null || true
 # tini as PID 1 -> entrypoint sets up identity and drops privileges via gosu.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+
+# opencode needs nothing beyond the shared base.
+FROM base AS opencode
+
+# Claude Code only. Last, so that it is the default target. Nothing here is setuid, so the strip
+# in the base still covers the whole image.
+FROM base AS claude
+ENV DISABLE_AUTOUPDATER=1
+# Force the bash sandbox off regardless of the mounted user settings.json.
+# Managed settings are the highest-precedence layer, so this wins over
+# (and does not modify) the user's ~/.claude/settings.json.
+RUN mkdir -p /etc/claude-code
+COPY managed-settings.json /etc/claude-code/managed-settings.json
+# Claude will abort if these are not world-readable.
+RUN chmod 0644 /etc/claude-code/managed-settings.json
+# cc-session-recover with a patch.
+# https://github.com/softcane/cc-session-recover/pull/2
+RUN git clone https://github.com/softcane/cc-session-recover.git /opt/cc-session-recover \
+    && cd /opt/cc-session-recover \
+    && git fetch origin pull/2/head:pr2 \
+    && { git diff main...pr2 | git apply --3way; } || true \
+    && sed -i 's#^GITIGNORE=.*#GITIGNORE=/dev/null#' scripts/install-into-project.sh \
+    && sed -i '/settings\.example\.json" "\$TARGET/d' scripts/install-into-project.sh \
+    && rm -rf .git

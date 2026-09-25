@@ -43,11 +43,11 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-__all__ = ('AGENTS', 'IMAGE_BASE', 'LABEL', 'RunSpec', 'build_images', 'config_dir', 'default_name',
-           'delete_images', 'ensure_image', 'gpu_ready', 'image_exists', 'image_up_to_date',
-           'is_python_project', 'list_managed', 'opencode_binary', 'project_containers', 'run',
-           'shell', 'stop', 'transient_uv_project_environment', 'unique_name',
-           'uv_project_environment', 'uv_project_environment_in')
+__all__ = ('AGENTS', 'IMAGE_BASE', 'IMAGE_TAGS', 'LABEL', 'RunSpec', 'build_images', 'config_dir',
+           'default_name', 'delete_images', 'ensure_image', 'gpu_ready', 'image_exists',
+           'image_up_to_date', 'is_python_project', 'list_managed', 'opencode_binary',
+           'project_containers', 'run', 'shell', 'stop', 'transient_uv_project_environment',
+           'unique_name', 'uv_project_environment', 'uv_project_environment_in')
 
 AGENTS = get_args(Agent)
 """
@@ -62,7 +62,16 @@ PROJECT_LABEL = 'sbclaude.project'
 HASH_LABEL = 'sbclaude.context_hash'
 """Docker label storing the build context hash for staleness checks."""
 IMAGE_BASE = 'sbclaude:latest'
-"""Tag of the sbclaude image."""
+"""Tag of the sbclaude image for Claude Code."""
+IMAGE_TAGS: dict[Agent, str] = {'claude': IMAGE_BASE, 'opencode': 'sbclaude:opencode'}
+"""
+Image tag for each agent, and the Dockerfile target it is built from.
+
+The opencode image is the shared base alone. The Claude Code image adds its managed settings and
+cc-session-recover on top, and shares every other layer.
+
+:meta hide-value:
+"""
 HARDENING_ARGS = ('--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE',
                   '--cap-add', 'FOWNER', '--cap-add', 'KILL', '--cap-add', 'SETUID', '--cap-add',
                   'SETGID', '--pids-limit', '4096')
@@ -678,7 +687,7 @@ def build_run_argv(spec: RunSpec) -> tuple[list[str], Path | None]:
     home = Path.home()
     cfg_dir = config_dir(home)
     uid, gid, user = os.getuid(), os.getgid(), getpass.getuser()
-    image = spec.image or IMAGE_BASE
+    image = spec.image or IMAGE_TAGS[spec.agent]
     tty = ('-i', '-t') if (sys.stdin.isatty() and sys.stdout.isatty()) else ('-i',)
     # no-new-privileges is dropped for a --sudo box (and only then): with it set, the kernel
     # ignores sudo's setuid bit, so escalation is impossible however the box is configured.
@@ -1317,8 +1326,8 @@ def run(spec: RunSpec) -> int:
     int
         The container's exit code, from the last attempt made.
     """
-    image = spec.image or IMAGE_BASE
-    if image == IMAGE_BASE:
+    image = spec.image or IMAGE_TAGS[spec.agent]
+    if image in IMAGE_TAGS.values():
         ensure_image(
             image,
             log=lambda line: print(line, file=sys.stderr),  # ruff: ignore[print]
@@ -1465,7 +1474,7 @@ def image_up_to_date(tag: str) -> bool:
 
 def delete_images() -> list[str]:
     """
-    Delete the sbclaude image.
+    Delete the sbclaude images.
 
     Returns
     -------
@@ -1474,7 +1483,7 @@ def delete_images() -> list[str]:
     """
     client = _client()
     removed: list[str] = []
-    for tag in (IMAGE_BASE,):
+    for tag in IMAGE_TAGS.values():
         try:
             client.images.remove(tag, force=True)
         except docker.errors.ImageNotFound:
@@ -1493,7 +1502,8 @@ def ensure_image(image: str,
     Parameters
     ----------
     image : str
-        The image tag to ensure. Only the sbclaude image is auto-built.
+        The image tag to ensure. Only the sbclaude images are auto-built, and a build produces all
+        of them.
     log : Callable[[str], None]
         Sink for build log lines.
     debian_mirror : str | None
@@ -1504,7 +1514,7 @@ def ensure_image(image: str,
     docker.errors.BuildError
         If the build fails and no usable image is already tagged.
     """
-    if image != IMAGE_BASE or image_up_to_date(image):
+    if image not in IMAGE_TAGS.values() or image_up_to_date(image):
         return
     existing = image_exists(image)
     log(f'Image {image} {"rebuilding (Dockerfile changed)" if existing else "building"}...')
@@ -1600,7 +1610,10 @@ def stop(name: str | None = None, project: Path | None = None) -> Iterator[str]:
 
 def build_images(*, no_cache: bool = False, debian_mirror: str | None = None) -> Iterator[str]:
     """
-    Build the sbclaude image, yielding log lines.
+    Build the sbclaude image for every agent, yielding log lines.
+
+    Each image is a target of the same Dockerfile. After the first, the build reuses the shared
+    base layers from the cache.
 
     Parameters
     ----------
@@ -1623,24 +1636,26 @@ def build_images(*, no_cache: bool = False, debian_mirror: str | None = None) ->
     mirror = debian_mirror.rstrip('/') if debian_mirror else None
     with resources.as_file(resources.files('sbclaude') / 'docker') as ctx:
         labels = {HASH_LABEL: _dir_hash(Path(ctx))}
-        yield f'==> Building {IMAGE_BASE} (Dockerfile)'
         buildargs = {'DEBIAN_MIRROR': mirror} if mirror else None
-        for chunk in client.api.build(path=str(ctx),
-                                      dockerfile='Dockerfile',
-                                      tag=IMAGE_BASE,
-                                      nocache=no_cache,
-                                      labels=labels,
-                                      buildargs=buildargs,
-                                      decode=True,
-                                      rm=True):
-            if (error := chunk.get('error')) and error.strip():
-                # The daemon reports a failed step in-band, as one more chunk of the log. Without
-                # raising here the generator would end normally and the caller would carry on as
-                # though the image had been built, leaving whatever stale image happened to
-                # already carry the tag in place.
-                yield error.rstrip('\n')
-                # The log has already been streamed to the caller line by line, so the exception
-                # carries an empty one rather than repeating it.
-                raise docker.errors.BuildError(error.strip(), iter(()))
-            if (line := chunk.get('stream', '')).strip():
-                yield line.rstrip('\n')
+        for agent, tag in IMAGE_TAGS.items():
+            yield f'==> Building {tag} (Dockerfile target {agent})'
+            for chunk in client.api.build(path=str(ctx),
+                                          dockerfile='Dockerfile',
+                                          target=agent,
+                                          tag=tag,
+                                          nocache=no_cache,
+                                          labels=labels,
+                                          buildargs=buildargs,
+                                          decode=True,
+                                          rm=True):
+                if (error := chunk.get('error')) and error.strip():
+                    # The daemon reports a failed step in-band, as one more chunk of the log.
+                    # Without raising here the generator would end normally and the caller would
+                    # carry on as though the image had been built, leaving whatever stale image
+                    # happened to already carry the tag in place.
+                    yield error.rstrip('\n')
+                    # The log has already been streamed to the caller line by line, so the
+                    # exception carries an empty one rather than repeating it.
+                    raise docker.errors.BuildError(error.strip(), iter(()))
+                if (line := chunk.get('stream', '')).strip():
+                    yield line.rstrip('\n')
