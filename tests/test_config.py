@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sbclaude.config import Config, config_path, expand_paths, load_config
+import pytest
+
+from sbclaude.config import Config, config_path, expand_paths, load_config, profiles_dir
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -263,3 +265,185 @@ def test_load_config_docker(tmp_path: Path) -> None:
     path = tmp_path / 'config.toml'
     path.write_text('[tool.sbclaude]\ndocker = true\n')
     assert load_config(path).docker is True
+
+
+def test_profiles_dir(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    assert profiles_dir(path) == tmp_path / 'profiles'
+    assert profiles_dir() == config_path().parent / 'profiles'
+
+
+def _write_profile(config: Path, name: str, text: str) -> None:
+    profiles = config.parent / 'profiles'
+    profiles.mkdir(exist_ok=True)
+    (profiles / f'{name}.toml').write_text(text)
+
+
+def test_load_config_profile_overrides_global(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nssh = false\nnetwork = "host"\nx11 = true\n')
+    _write_profile(path, 'work', '[tool.sbclaude.profile]\nssh = true\nnetwork = "bridge"\n')
+    cfg = load_config(path, profile='work')
+    assert cfg.ssh is True
+    assert cfg.network == 'bridge'
+    assert cfg.x11 is True
+
+
+def test_load_config_profile_env_merges(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude.env]\nA = "1"\nB = "2"\n')
+    _write_profile(path, 'work', '[tool.sbclaude.profile.env]\nB = "3"\nC = "4"\n')
+    assert load_config(path, profile='work').env == {'A': '1', 'B': '3', 'C': '4'}
+
+
+def test_load_config_profile_without_table(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nssh = true\n')
+    _write_profile(path, 'work', '[tool.black]\nline-length = 100\n')
+    cfg = load_config(path, profile='work')
+    assert cfg.ssh is True
+
+
+def test_load_config_profile_bare_table(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    _write_profile(path, 'work', '[tool.sbclaude]\nssh = true\n')
+    cfg = load_config(path, profile='work')
+    assert cfg.ssh is True
+    assert cfg.network == 'host'
+
+
+def test_load_config_profile_tables_merge(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    _write_profile(
+        path, 'work', '[tool.sbclaude]\nssh = true\nnetwork = "bridge"\n'
+        '[tool.sbclaude.env]\nA = "1"\nB = "2"\n'
+        '[tool.sbclaude.profile]\nnetwork = "none"\n'
+        '[tool.sbclaude.profile.env]\nB = "3"\n')
+    cfg = load_config(path, profile='work')
+    assert cfg.ssh is True
+    assert cfg.network == 'none'
+    assert cfg.env == {'A': '1', 'B': '3'}
+
+
+def test_load_config_explicit_profile_keeps_default_profile(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\ndefault_profile = "work"\n')
+    _write_profile(path, 'work', '[tool.sbclaude.profile]\nssh = true\n')
+    _write_profile(path, 'home', '[tool.sbclaude.profile]\ngpg = true\n')
+    cfg = load_config(path, profile='home')
+    assert cfg.gpg is True
+    assert cfg.ssh is False
+    assert cfg.default_profile == 'work'
+
+
+def test_load_config_project_ignores_default_profile(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    _write_profile(path, 'work', '[tool.sbclaude.profile]\nssh = true\n')
+    _write_profile(path, 'other', '[tool.sbclaude.profile]\ngpg = true\n')
+    project = tmp_path / 'proj'
+    project.mkdir()
+    (project / 'pyproject.toml').write_text('[tool.sbclaude]\ndefault_profile = "other"\n')
+    cfg = load_config(path, project=project, profile='work')
+    assert cfg.ssh is True
+    assert cfg.gpg is False
+    assert cfg.default_profile is None
+
+
+def test_load_config_profile_with_missing_global_config(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    profiles = tmp_path / 'profiles'
+    profiles.mkdir()
+    (profiles / 'work.toml').write_text('[tool.sbclaude.profile]\nssh = true\n')
+    cfg = load_config(path, profile='work')
+    assert cfg.ssh is True
+
+
+def test_load_config_profile_may_set_claude_binary(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    _write_profile(path, 'work', '[tool.sbclaude.profile]\nclaude_binary = "/opt/claude"\n')
+    assert load_config(path, profile='work').claude_binary == '/opt/claude'
+
+
+def test_load_config_default_profile(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\ndefault_profile = "work"\nnetwork = "host"\n')
+    _write_profile(path, 'work', '[tool.sbclaude.profile]\nssh = true\n')
+    cfg = load_config(path)
+    assert cfg.ssh is True
+    assert cfg.network == 'host'
+    assert cfg.default_profile == 'work'
+
+
+def test_load_config_explicit_profile_beats_default(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\ndefault_profile = "work"\n')
+    _write_profile(path, 'work', '[tool.sbclaude.profile]\nssh = true\n')
+    _write_profile(path, 'home', '[tool.sbclaude.profile]\nssh = false\ngpg = true\n')
+    cfg = load_config(path, profile='home')
+    assert cfg.ssh is False
+    assert cfg.gpg is True
+
+
+def test_load_config_profile_ignores_nested_default_profile(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\ndefault_profile = "work"\n')
+    _write_profile(path, 'work', '[tool.sbclaude.profile]\nssh = true\ndefault_profile = "home"\n')
+    _write_profile(path, 'home', '[tool.sbclaude.profile]\ngpg = true\n')
+    cfg = load_config(path)
+    assert cfg.ssh is True
+    assert cfg.gpg is False
+    assert cfg.default_profile == 'work'
+
+
+def test_load_config_project_overrides_profile(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    _write_profile(path, 'work', '[tool.sbclaude.profile]\nnetwork = "bridge"\nssh = true\n')
+    project = tmp_path / 'proj'
+    project.mkdir()
+    (project / 'pyproject.toml').write_text('[tool.sbclaude]\nnetwork = "none"\n')
+    cfg = load_config(path, project=project, profile='work')
+    assert cfg.network == 'none'
+    assert cfg.ssh is True
+
+
+def test_load_config_project_env_merges_over_profile(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude.env]\nA = "1"\n')
+    _write_profile(path, 'work', '[tool.sbclaude.profile.env]\nA = "2"\nB = "3"\n')
+    project = tmp_path / 'proj'
+    project.mkdir()
+    (project / 'pyproject.toml').write_text('[tool.sbclaude.env]\nB = "4"\n')
+    assert load_config(path, project=project, profile='work').env == {'A': '2', 'B': '4'}
+
+
+def test_load_config_missing_profile(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    with pytest.raises(FileNotFoundError, match='work'):
+        load_config(path, profile='work')
+
+
+def test_load_config_missing_default_profile(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\ndefault_profile = "work"\n')
+    with pytest.raises(FileNotFoundError, match='work'):
+        load_config(path)
+
+
+def test_load_config_no_profile_without_default(tmp_path: Path) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nssh = true\n')
+    assert load_config(path) == load_config(path, profile=None)
+
+
+@pytest.mark.parametrize('name', ['../evil', 'a/b', '', '.hidden', '..', 'has space', 'a:b'])
+def test_load_config_invalid_profile_name(tmp_path: Path, name: str) -> None:
+    path = tmp_path / 'config.toml'
+    path.write_text('[tool.sbclaude]\nnetwork = "host"\n')
+    with pytest.raises(ValueError, match='invalid profile name'):
+        load_config(path, profile=name)

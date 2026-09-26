@@ -229,8 +229,9 @@ is a warning to the daemon but death to the container.
 ## Configuration
 
 All options live under a `[tool.sbclaude]` table. They are read from the global file at
-`~/.config/sbclaude/config.toml` (path from `platformdirs`) and, for `run`, overlaid with the
-target project's `pyproject.toml` `[tool.sbclaude]` table — project values win, so a repo can
+`~/.config/sbclaude/config.toml` (path from `platformdirs`), overlaid with the selected
+profile from `~/.config/sbclaude/profiles/`, and, for `run`, overlaid with the target
+project's `pyproject.toml` `[tool.sbclaude]` table — project values win, so a repo can
 pin its own defaults. All keys optional:
 
 ```toml
@@ -253,6 +254,7 @@ x11 = true       # forward X11 for GUI apps
 # venv_dir = "/venv-cache"        # hold the box's virtualenv here (pair with a docker_args volume)
 # claude_binary = "~/bin/claude"  # mount this claude build rather than the first one on PATH
 # agent = "opencode"              # run opencode instead of claude (same as --agent opencode)
+# default_profile = "work"        # apply this profile when --profile is absent
 # gentoo = true                   # run the Gentoo image for ebuild work (same as --gentoo)
 # fullscreen = false              # do not force the fullscreen TUI (keeps start-up errors visible)
 keyring_keys = ["GH_TOKEN=gh:github.com"]          # copy only these host secrets in, as env vars
@@ -267,6 +269,26 @@ CLAUDE_CODE_USE_BEDROCK = "1"
 The toggle keys `re`, `ghidra`, `android`, `docker`, `gentoo`, `gpu`, `usb`, `ios`, `keyring`,
 `wayland`, `desktop`, `x11`, `ssh`, `gpg`, and `sudo` mirror the matching `run` flags and
 default to `false`; setting a key is the same as always passing the matching flag.
+
+### Profiles
+
+Named profiles live beside the global config in `~/.config/sbclaude/profiles/<name>.toml`
+and store any key from `[tool.sbclaude]`, under a `[tool.sbclaude.profile]` table:
+
+```toml
+[tool.sbclaude.profile]
+network = "bridge"
+ssh = true
+
+[tool.sbclaude.profile.env]
+ENV_VAR = "some value"
+```
+
+Select one with `sbclaude run --profile <name>` (`build` accepts the flag as well), or set
+`default_profile = "<name>"` in the global config to apply a profile when `--profile` is
+absent. An explicit `--profile` wins over `default_profile`. Profile values override the
+global config, and the project `pyproject.toml` overrides both; the `[env]` tables merge
+key by key at each step.
 
 ### Secrets
 

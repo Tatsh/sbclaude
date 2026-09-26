@@ -850,3 +850,78 @@ def test_run_docker_off_by_default(runner: CliRunner, mocker: MockerFixture) -> 
     mocker.patch('sbclaude.main.load_config', return_value=Config())
     runner.invoke(main, ['run'])
     assert run.call_args[0][0].use_docker is False
+
+
+def test_run_profile_reaches_load_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    load = mocker.patch('sbclaude.main.load_config', return_value=Config())
+    assert runner.invoke(main, ['run', '--profile', 'work']).exit_code == 0
+    assert load.call_args.kwargs['profile'] == 'work'
+    assert run.called
+
+
+def test_run_profile_defaults_to_none(runner: CliRunner, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.main.container.run', return_value=0)
+    load = mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['run'])
+    assert load.call_args.kwargs['profile'] is None
+
+
+def test_run_missing_profile_exits_non_zero(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config',
+                 side_effect=FileNotFoundError("profile 'work' not found"))
+    result = runner.invoke(main, ['run', '--profile', 'work'])
+    assert result.exit_code != 0
+    assert 'work' in result.output
+    assert not run.called
+
+
+def test_run_invalid_profile_name_exits_non_zero(runner: CliRunner, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', side_effect=ValueError('invalid profile name'))
+    assert runner.invoke(main, ['run', '--profile', '../evil']).exit_code != 0
+
+
+def test_build_profile_reaches_load_config(runner: CliRunner, mocker: MockerFixture) -> None:
+    build = mocker.patch('sbclaude.main.container.build_images', return_value=iter([]))
+    load = mocker.patch('sbclaude.main.load_config', return_value=Config())
+    assert runner.invoke(main, ['build', '--profile', 'work']).exit_code == 0
+    assert load.call_args.kwargs['profile'] == 'work'
+    assert build.called
+
+
+def test_build_profile_defaults_to_none(runner: CliRunner, mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.main.container.build_images', return_value=iter([]))
+    load = mocker.patch('sbclaude.main.load_config', return_value=Config())
+    runner.invoke(main, ['build'])
+    assert load.call_args.kwargs['profile'] is None
+
+
+def test_build_invalid_profile_name_exits_non_zero(runner: CliRunner,
+                                                   mocker: MockerFixture) -> None:
+    build = mocker.patch('sbclaude.main.container.build_images', return_value=iter([]))
+    mocker.patch('sbclaude.main.load_config', side_effect=ValueError('invalid profile name'))
+    assert runner.invoke(main, ['build', '--profile', '../evil']).exit_code != 0
+    assert not build.called
+
+
+def test_run_forwards_project_and_profile_to_load_config(runner: CliRunner, mocker: MockerFixture,
+                                                         tmp_path: Path) -> None:
+    mocker.patch('sbclaude.main.container.run', return_value=0)
+    load = mocker.patch('sbclaude.main.load_config', return_value=Config())
+    project = tmp_path / 'proj'
+    project.mkdir()
+    assert runner.invoke(main, ['run', '-p', str(project), '--profile', 'work']).exit_code == 0
+    assert load.call_args.kwargs['project'] == project.resolve()
+    assert load.call_args.kwargs['profile'] == 'work'
+
+
+def test_build_missing_profile_exits_non_zero(runner: CliRunner, mocker: MockerFixture) -> None:
+    build = mocker.patch('sbclaude.main.container.build_images', return_value=iter([]))
+    mocker.patch('sbclaude.main.load_config',
+                 side_effect=FileNotFoundError("profile 'work' not found"))
+    result = runner.invoke(main, ['build', '--profile', 'work'])
+    assert result.exit_code != 0
+    assert 'work' in result.output
+    assert not build.called

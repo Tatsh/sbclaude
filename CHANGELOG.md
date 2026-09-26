@@ -43,6 +43,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   package, using the host's installed files, and installs the result in the Gentoo box.
 - `sbclaude build --gentoo` builds the Gentoo images, and `sbclaude delete-image` removes them.
   Saved state survives `delete-image`.
+- `--profile` (config key `default_profile`) applies a profile from
+  `$CONFIG_DIR/profiles/<name>.toml` under `[tool.sbclaude.profile]`, available on
+  `sbclaude run` and `sbclaude build`. Profile values override the global config and the
+  project `pyproject.toml` overrides both, with `[env]` tables merged key by key.
 
 ### Fixed
 

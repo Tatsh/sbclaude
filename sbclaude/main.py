@@ -83,6 +83,9 @@ def main(ctx: click.Context) -> None:
               '--project',
               type=click.Path(exists=True, file_okay=False, path_type=Path),
               help='Project dir (read-write, becomes the workdir). Default: cwd.')
+@click.option('--profile',
+              help='Config profile from the profiles directory, overlaid on the global '
+              'config. Default: the default_profile key.')
 @click.option('-w', '--rw', 'rw_extra', multiple=True, help='Extra read-write mount.')
 @click.option('-r', '--ro', 'ro_extra', multiple=True, help='Extra read-only mount.')
 @click.option('-n', '--name', help='Container name (default: sbclaude-<project>).')
@@ -197,6 +200,7 @@ def main(ctx: click.Context) -> None:
 @click.argument('claude_args', nargs=-1, type=click.UNPROCESSED)
 def run(
     project: Path | None,
+    profile: str | None,
     rw_extra: tuple[str, ...],
     ro_extra: tuple[str, ...],
     env_extra: tuple[str, ...],
@@ -237,7 +241,10 @@ def run(
     """Launch the agent in a fresh container. Arguments after ``--`` pass through to the agent."""
     setup_logging(debug=debug, loggers={'sbclaude': {}})
     proj = (project or Path.cwd()).resolve()
-    cfg = load_config(project=proj)
+    try:
+        cfg = load_config(project=proj, profile=profile)
+    except (FileNotFoundError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
     use_re = use_re or cfg.re
     use_ghidra = use_ghidra or use_re or cfg.ghidra
     use_gpu = use_gpu or cfg.gpu
@@ -467,10 +474,17 @@ def shell(name: str | None, *, as_root: bool) -> None:
               help='Debian archive mirror to bake into the image, e.g. '
               'http://ftp.us.debian.org/debian.')
 @click.option('--gentoo', is_flag=True, help='Build the Gentoo images instead of the Debian ones.')
-def build(debian_mirror: str | None, *, gentoo: bool, no_cache: bool) -> None:
+@click.option('--profile',
+              help='Config profile from the profiles directory, overlaid on the global '
+              'config. Default: the default_profile key.')
+def build(debian_mirror: str | None, profile: str | None, *, gentoo: bool, no_cache: bool) -> None:
     # ruff: ignore[docstring-missing-exception]
     """Build the sbclaude Docker images (one per agent) for one distribution."""
-    mirror = debian_mirror or load_config().debian_mirror
+    try:
+        cfg = load_config(profile=profile)
+    except (FileNotFoundError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
+    mirror = debian_mirror or cfg.debian_mirror
     try:
         for line in container.build_images(no_cache=no_cache,
                                            debian_mirror=mirror,
