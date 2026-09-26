@@ -6,6 +6,7 @@ apktool
 appdir
 appimage
 appinfo
+argparse
 asyncio
 autodoc
 autoupdater
@@ -26,10 +27,12 @@ capsys
 cdrommsf
 cflags
 chowning
+classmethod
 clearsign
 cmdline
 commitizen
 conftest
+contextlib
 coveragerc
 coverallsapp
 crashpad
@@ -48,6 +51,7 @@ dejavu
 delenv
 descs
 dialog
+dialogs
 distdir
 distfiles
 dockerfiles
@@ -65,8 +69,10 @@ enoent
 esac
 esbenp
 esbonio
+evdev
 excinfo
 execve
+filesink
 flathub
 fowner
 foxundermoon
@@ -76,6 +82,7 @@ functools
 fxaa
 genindex
 gentoolkit
+getattr
 getbinpkg
 getgid
 getpwuid
@@ -94,16 +101,23 @@ gosu
 gotchas
 gpgconf
 gpgsign
+gstreamer
 handoff
 hostgid
 hostuser
 hoverxref
 htmlcov
 idevice
+iface
 ihdr
 incl
 ioctl
+isalpha
+isascii
+isdigit
+isinstance
 isort
+isupper
 itertools
 jadx
 jbaaaaaaaaaaar
@@ -112,6 +126,7 @@ journalctl
 jsonnet
 jsonnetfmt
 jsonschema
+keysym
 kwargs
 launchable
 lextudio
@@ -192,6 +207,8 @@ pathlib
 pavelzw
 pinentry
 pipefail
+pipewire
+pipewiresrc
 pipfile
 pipx
 pkgcheck
@@ -200,6 +217,7 @@ pkgdir
 platformdirs
 plistlib
 pngdefry
+pngenc
 popen
 portageq
 preapproved
@@ -221,6 +239,8 @@ pythonhosted
 pyvenv
 quickpkg
 regen
+removeprefix
+rfile
 ripgreprc
 riscv
 rmse
@@ -234,6 +254,7 @@ schemafile
 sdist
 sdkmanager
 seccomp
+sess
 setattr
 setgid
 setuid
@@ -241,6 +262,7 @@ shellcheck
 shellformat
 shntool
 shopt
+shutil
 signingkey
 sigtrap
 sigwinch
@@ -252,7 +274,9 @@ snapcraft
 softpipe
 soupsieve
 sphinxcontrib
+starmap
 statusline
+subparsers
 supersampled
 swiftshader
 syft
@@ -289,11 +313,13 @@ vars
 vendored
 venv
 vgmstream
+videoconvert
 virtualenv
 vsync
 wavpack
 webgl
 webshot
+wfile
 whats
 winget
 wireit

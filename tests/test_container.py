@@ -1355,6 +1355,170 @@ def test_build_run_argv_wayland_missing_socket(mocker: MockerFixture, tmp_path: 
     assert not any(a.startswith('WAYLAND_DISPLAY=') for a in argv)
 
 
+def test_build_run_argv_desktop(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    runtime = tmp_path / 'run'
+    runtime.mkdir()
+    (runtime / 'wayland-1').write_text('')
+    (runtime / 'pipewire-0').write_text('')
+    (runtime / 'pipewire-0-manager').write_text('')
+    mocker.patch.dict(os.environ, {
+        'XDG_RUNTIME_DIR': str(runtime),
+        'WAYLAND_DISPLAY': 'wayland-1',
+        'DBUS_SESSION_BUS_ADDRESS': ''
+    })
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_desktop=True))
+    assert 'WAYLAND_DISPLAY=wayland-1' in argv
+    assert 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1234/bus' in argv
+    assert 'XDG_RUNTIME_DIR=/run/user/1234' in argv
+    assert f'{runtime / "pipewire-0"}:/run/user/1234/pipewire-0' in argv
+    assert f'{runtime / "pipewire-0-manager"}:/run/user/1234/pipewire-0-manager' in argv
+
+
+def test_build_run_argv_desktop_pipewire_missing(mocker: MockerFixture, tmp_path: Path,
+                                                 capsys: pytest.CaptureFixture[str]) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    runtime = tmp_path / 'run'
+    runtime.mkdir()
+    (runtime / 'wayland-1').write_text('')
+    mocker.patch.dict(os.environ, {
+        'XDG_RUNTIME_DIR': str(runtime),
+        'WAYLAND_DISPLAY': 'wayland-1',
+        'DBUS_SESSION_BUS_ADDRESS': ''
+    })
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_desktop=True))
+    assert 'WAYLAND_DISPLAY=wayland-1' in argv
+    assert 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1234/bus' in argv
+    assert not any('pipewire-0' in arg for arg in argv)
+    assert 'no PipeWire socket' in capsys.readouterr().err
+
+
+def test_build_run_argv_desktop_covers_wayland(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    runtime = tmp_path / 'run'
+    runtime.mkdir()
+    (runtime / 'wayland-1').write_text('')
+    (runtime / 'pipewire-0').write_text('')
+    mocker.patch.dict(os.environ, {
+        'XDG_RUNTIME_DIR': str(runtime),
+        'WAYLAND_DISPLAY': 'wayland-1',
+        'DBUS_SESSION_BUS_ADDRESS': ''
+    })
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_desktop=True, use_wayland=True))
+    # One mount plus one WAYLAND_DISPLAY variable: --desktop covers --wayland on its own.
+    assert sum('wayland-1' in arg for arg in argv) == 2
+
+
+def test_build_run_argv_desktop_warns_of_host_control(mocker: MockerFixture, tmp_path: Path,
+                                                      capsys: pytest.CaptureFixture[str]) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    runtime = tmp_path / 'run'
+    runtime.mkdir()
+    (runtime / 'wayland-1').write_text('')
+    (runtime / 'pipewire-0').write_text('')
+    mocker.patch.dict(os.environ, {
+        'XDG_RUNTIME_DIR': str(runtime),
+        'WAYLAND_DISPLAY': 'wayland-1',
+        'DBUS_SESSION_BUS_ADDRESS': ''
+    })
+    project = tmp_path / 'p'
+    project.mkdir()
+    container.build_run_argv(container.RunSpec(project=project, name='n', use_desktop=True))
+    assert 'portal approval' in capsys.readouterr().err
+
+
+def test_build_run_argv_desktop_without_session_bus(mocker: MockerFixture, tmp_path: Path,
+                                                    capsys: pytest.CaptureFixture[str]) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=False)
+    runtime = tmp_path / 'run'
+    runtime.mkdir()
+    (runtime / 'wayland-1').write_text('')
+    (runtime / 'pipewire-0').write_text('')
+    mocker.patch.dict(os.environ, {
+        'XDG_RUNTIME_DIR': str(runtime),
+        'WAYLAND_DISPLAY': 'wayland-1',
+        'DBUS_SESSION_BUS_ADDRESS': ''
+    })
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_desktop=True))
+    assert 'WAYLAND_DISPLAY=wayland-1' in argv
+    assert f'{runtime / "pipewire-0"}:/run/user/1234/pipewire-0' in argv
+    assert not any('DBUS_SESSION_BUS_ADDRESS' in arg for arg in argv)
+    assert '--desktop: no session bus socket' in capsys.readouterr().err
+
+
+def test_build_run_argv_desktop_without_wayland(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    runtime = tmp_path / 'run'
+    runtime.mkdir()
+    (runtime / 'pipewire-0').write_text('')
+    mocker.patch.dict(os.environ, {
+        'XDG_RUNTIME_DIR': str(runtime),
+        'WAYLAND_DISPLAY': 'absent-0',
+        'DBUS_SESSION_BUS_ADDRESS': ''
+    })
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_desktop=True))
+    assert not any(a.startswith('WAYLAND_DISPLAY=') for a in argv)
+    assert 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1234/bus' in argv
+    assert f'{runtime / "pipewire-0"}:/run/user/1234/pipewire-0' in argv
+
+
+def test_build_run_argv_desktop_pipewire_main_only(mocker: MockerFixture, tmp_path: Path,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    mocker.patch('sbclaude.container.os.getuid', return_value=1234)
+    mocker.patch('sbclaude.container.Path.is_socket', return_value=True)
+    runtime = tmp_path / 'run'
+    runtime.mkdir()
+    (runtime / 'wayland-1').write_text('')
+    (runtime / 'pipewire-0').write_text('')
+    mocker.patch.dict(os.environ, {
+        'XDG_RUNTIME_DIR': str(runtime),
+        'WAYLAND_DISPLAY': 'wayland-1',
+        'DBUS_SESSION_BUS_ADDRESS': ''
+    })
+    project = tmp_path / 'p'
+    project.mkdir()
+    argv, _ = container.build_run_argv(
+        container.RunSpec(project=project, name='n', use_desktop=True))
+    assert f'{runtime / "pipewire-0"}:/run/user/1234/pipewire-0' in argv
+    assert not any('pipewire-0-manager' in arg for arg in argv)
+    assert 'no PipeWire socket' not in capsys.readouterr().err
+
+
 def test_run_cleans_up_patched_settings(docker_run: Callable[..., MagicMock], mocker: MockerFixture,
                                         tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')

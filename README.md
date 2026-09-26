@@ -197,6 +197,7 @@ more than one is running).
 | `--keyring`         | forward the D-Bus session bus to reach the host keyring (grants every secret)    |
 | `--keyring-keys`    | copy only the named host secrets in as environment variables                     |
 | `--wayland`         | forward the Wayland socket for GUI apps (preferred over `--x11`)                 |
+| `--desktop`         | forward the host desktop session for agent capture and input                     |
 | `--x11`             | forward `DISPLAY` + `XAUTHORITY` for GUI apps (Ghidra GUI, jadx-gui, emulator)   |
 | `--ssh`             | mount the host `~/.ssh` read-only and forward the ssh-agent, for SSH git remotes |
 | `--gpg`             | mount the host GnuPG home + agent socket for signing commits                     |
@@ -234,6 +235,7 @@ pin its own defaults. All keys optional:
 
 ```toml
 [tool.sbclaude]
+desktop = true   # forward the host desktop session for portal capture and input
 gpg = true       # mount the GnuPG home + agent for signing
 keyring = true   # forward the D-Bus session bus to reach the host keyring
 network = "host" # default; "bridge" to isolate the box's network
@@ -263,8 +265,8 @@ CLAUDE_CODE_USE_BEDROCK = "1"
 ```
 
 The toggle keys `re`, `ghidra`, `android`, `docker`, `gentoo`, `gpu`, `usb`, `ios`, `keyring`,
-`wayland`, `x11`, `ssh`, `gpg`, and `sudo` mirror the matching `run` flags and default to `false`;
-setting a key is the same as always passing the matching flag.
+`wayland`, `desktop`, `x11`, `ssh`, `gpg`, and `sudo` mirror the matching `run` flags and
+default to `false`; setting a key is the same as always passing the matching flag.
 
 ### Secrets
 
@@ -627,6 +629,19 @@ cookie error, run on the host: `xhost +SI:localuser:$USER`.
 socket alone, and a Wayland client cannot read other windows or inject input into them, whereas
 an X11 cookie grants exactly that over the whole session. The socket is re-homed under the
 box's own `/run/user/<uid>` and `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR` are set to match.
+
+`--desktop` exposes the host desktop session itself to the agent. The agent can then see
+and control the session. It forwards the Wayland socket, the D-Bus session bus, and the
+PipeWire sockets together, and the ScreenCast and RemoteDesktop portals provide capture and
+input over those sockets. The image ships a `host-desktop` helper driving those portals:
+`host-desktop check` verifies the forwarding, `host-desktop shot screen.png` captures the
+desktop, `host-desktop click X Y` presses a pointer button, and `host-desktop serve` retains
+one approved session open behind a loopback HTTP API for repeated work. Each fresh session
+shows one approval dialog on the host. Approve the dialog there and the command proceeds. On
+KDE Plasma the approval can persist. `--desktop` is the widest desktop grant sbclaude
+offers, since an approved session injects input across the whole host session. Prefer a
+dedicated host user for unattended sessions. Without `--desktop`, `--wayland` only shows
+the box's own windows on the host. It never exposes host windows to the box.
 
 `--gpu` uses the NVIDIA container runtime when it is present and also passes through the DRM
 render nodes (`/dev/dri/renderD*`), so Mesa on AMD/Intel and Vulkan/VA-API work too. The

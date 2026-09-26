@@ -98,7 +98,11 @@ RUN curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public \
         libx11-6 libxcb1 libxcursor1 libxrandr2 libxi6 libxtst6 libxrender1 \
         libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxss1 \
         libfontconfig1 libfreetype6 fonts-dejavu-core \
+        pipewire gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+        gstreamer1.0-pipewire \
     && rm -rf /var/lib/apt/lists/*
+# host-desktop: D-Bus portal client library for host desktop capture and input.
+RUN /opt/venv/bin/pip install --no-cache-dir dbus-next
 # Frida and mitmproxy.
 RUN /opt/venv/bin/pip install --no-cache-dir "frida==17.9.11" frida-tools mitmproxy
 # dex2jar with a d2j-dex2jar convenience launcher.
@@ -198,13 +202,15 @@ RUN set -eux; \
     chmod -R a+rX /opt/playwright /opt/webshot
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 # Launchers for the host-mounted tools (jars/scripts arrive via bind mounts at run time).
-COPY bin/apktool bin/analyzeHeadless bin/ghidraRun /usr/local/bin/
+# host-desktop drives the host desktop through xdg-desktop-portal; it needs --desktop.
+COPY bin/apktool bin/analyzeHeadless bin/ghidraRun bin/host-desktop /usr/local/bin/
 # 755, not +x. COPY preserves the build context's mode, and `chmod +x` only adds the
 # execute bit, so a source file checked out 750 lands as 751: executable by the
 # container user but not readable by it. That is fatal for a shell script, because
 # the interpreter — not the kernel — has to open it, so it fails with a bare
 # 'Permission denied' that looks nothing like a permissions problem.
-RUN chmod 755 /usr/local/bin/apktool /usr/local/bin/analyzeHeadless /usr/local/bin/ghidraRun
+RUN chmod 755 /usr/local/bin/apktool /usr/local/bin/analyzeHeadless /usr/local/bin/ghidraRun \
+    /usr/local/bin/host-desktop
 # Export the toolchain for login shells (which re-read /etc/profile and would otherwise
 # reset PATH), so tools resolve no matter how a shell is spawned.
 RUN printf '%s\n' \

@@ -27,7 +27,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "SBCLAUDE" "1" "Sep 21, 2026" "0.3.0" "sbclaude"
+.TH "SBCLAUDE" "1" "Sep 26, 2026" "0.3.0" "sbclaude"
 .SH NAME
 sbclaude \- sbclaude v0.3.0
 .sp
@@ -59,7 +59,7 @@ Show the version and exit.
 .UNINDENT
 .SS build
 .sp
-Build the sbclaude Docker image from the packaged Dockerfile.
+Build the sbclaude Docker images (one per agent) for one distribution.
 .sp
 Usage
 .INDENT 0.0
@@ -81,6 +81,11 @@ Build without the cache.
 .TP
 .B \-\-debian\-mirror <debian_mirror>
 Debian archive mirror to bake into the image, e.g. \X'tty: link http://ftp.us.debian.org/debian'\fI\%http://ftp.us.debian.org/debian\fP\X'tty: link'\&.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-gentoo
+Build the Gentoo images instead of the Debian ones.
 .UNINDENT
 .SS config
 .sp
@@ -121,9 +126,34 @@ sbclaude ls [OPTIONS]
 .EE
 .UNINDENT
 .UNINDENT
+.SS reset
+.sp
+Discard a project\(aqs saved Gentoo box. The next box starts from the image.
+.sp
+Usage
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+sbclaude reset [OPTIONS]
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+Options
+.INDENT 0.0
+.TP
+.B \-p, \-\-project <project>
+Project dir whose state to discard. Default: cwd.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-all
+Discard every project\(aqs saved state.
+.UNINDENT
 .SS run
 .sp
-Launch claude in a fresh container. Args after \fB\-\-\fP pass through to claude.
+Launch the agent in a fresh container. Arguments after \fB\-\-\fP pass through to the agent.
 .sp
 Usage
 .INDENT 0.0
@@ -163,6 +193,16 @@ Image override.
 .UNINDENT
 .INDENT 0.0
 .TP
+.B \-a, \-\-agent <agent>
+Coding agent to run in the box (claude by default). opencode is taken from PATH, or the latest release is downloaded when PATH has no opencode.
+.INDENT 7.0
+.TP
+.B Options
+claude | opencode
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.TP
 .B \-\-claude\-binary <claude_binary>
 Host claude executable to mount instead of the first one on PATH. Use this to pin a version, or to supply an ELF build.
 .UNINDENT
@@ -188,6 +228,11 @@ Enable the Ghidra and Android host mounts together.
 .UNINDENT
 .INDENT 0.0
 .TP
+.B \-\-gentoo
+Run the Gentoo image for ebuild work. The box is saved between sessions and has passwordless sudo.
+.UNINDENT
+.INDENT 0.0
+.TP
 .B \-\-ghidra
 Mount host Ghidra (read\-only).
 .UNINDENT
@@ -208,6 +253,11 @@ Expose /dev/bus/usb for adb.
 .UNINDENT
 .INDENT 0.0
 .TP
+.B \-\-docker
+Forward the host Docker daemon socket. The socket grants root on the host unless the daemon is rootless.
+.UNINDENT
+.INDENT 0.0
+.TP
 .B \-\-ios
 Mount the host usbmuxd socket so frida can reach an iOS device.
 .UNINDENT
@@ -225,6 +275,11 @@ Comma\-separated NAME=SERVICE secrets to copy in as environment variables, such 
 .TP
 .B \-\-wayland
 Forward the Wayland socket for GUIs (preferred over \-\-x11).
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-desktop
+Forward the host desktop session for portal screen capture and input, so the agent can see and control it after host approval.
 .UNINDENT
 .INDENT 0.0
 .TP

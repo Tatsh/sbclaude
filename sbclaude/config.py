@@ -82,6 +82,8 @@ class Config:
     """Docker CPU limit (e.g. ``4``); ``None`` leaves the CPU uncapped."""
     debian_mirror: str | None = None
     """Debian archive mirror used when building the image, or ``None`` for the default."""
+    desktop: bool = False
+    """Whether to forward the host desktop session for portal screen capture and input."""
     docker: bool = False
     """
     Whether to forward the host Docker daemon socket into the box.
@@ -236,6 +238,7 @@ def load_config(path: Path | None = None, *, project: Path | None = None) -> Con
                   claude_binary=(str(data['claude_binary']) if data.get('claude_binary') else None),
                   cpus=(str(data['cpus']) if data.get('cpus') is not None else None),
                   debian_mirror=(str(data['debian_mirror']) if data.get('debian_mirror') else None),
+                  desktop=bool(data.get('desktop', False)),
                   docker=bool(data.get('docker', False)),
                   docker_args=_str_list(data.get('docker_args')),
                   env=_str_dict(data.get('env')),

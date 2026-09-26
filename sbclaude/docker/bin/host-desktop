@@ -1,0 +1,1106 @@
+#!/usr/bin/env python3
+"""See and control the host desktop through xdg-desktop-portal.
+
+Screen capture arrives over the forwarded PipeWire socket, and input goes
+through the RemoteDesktop portal. Run inside a box started with --desktop.
+The flag forwards the Wayland, D-Bus session bus, and PipeWire sockets. Each
+fresh portal session shows one approval dialog on the host. Approve the dialog
+there, and the command proceeds. Prefer `serve` for repeated work. It retains
+a single session open, so the host approves once and later shots and input run
+without further dialogs.
+"""
+
+from __future__ import annotations
+
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from itertools import starmap
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+import argparse
+import asyncio
+import contextlib
+import json
+import os
+import secrets
+import shutil
+import subprocess as sp
+import sys
+import tempfile
+
+if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
+try:
+    from dbus_next import Message, Variant
+    from dbus_next.aio import MessageBus
+    from dbus_next.errors import DBusError
+except ImportError:
+    sys.stderr.write('host-desktop: the dbus-next package is missing from /opt/venv.\n')
+    raise SystemExit(2) from None
+
+PORTAL_BUS = 'org.freedesktop.portal.Desktop'
+PORTAL_PATH = '/org/freedesktop/portal/desktop'
+SCREENCAST_IFACE = 'org.freedesktop.portal.ScreenCast'
+REMOTE_IFACE = 'org.freedesktop.portal.RemoteDesktop'
+REQUEST_IFACE = 'org.freedesktop.portal.Request'
+SESSION_IFACE = 'org.freedesktop.portal.Session'
+START_TIMEOUT = 180.0
+CALL_TIMEOUT = 30.0
+CAPTURE_TIMEOUT = 25.0
+
+DEVICE_KEYBOARD = 1
+DEVICE_POINTER = 2
+SOURCE_MONITOR = 1
+CURSOR_EMBEDDED = 2
+CURSOR_HIDDEN = 1
+BTN_LEFT = 272
+BTN_MIDDLE = 274
+BTN_RIGHT = 273
+BUTTONS = {
+    '1': BTN_LEFT,
+    '2': BTN_MIDDLE,
+    '3': BTN_RIGHT,
+    'left': BTN_LEFT,
+    'middle': BTN_MIDDLE,
+    'right': BTN_RIGHT
+}
+NAMED_KEYS = {
+    'Return': 0xff0d,
+    'Enter': 0xff0d,
+    'Tab': 0xff09,
+    'Escape': 0xff1b,
+    'Esc': 0xff1b,
+    'BackSpace': 0xff08,
+    'Backspace': 0xff08,
+    'Delete': 0xffff,
+    'Insert': 0xff63,
+    'Home': 0xff50,
+    'End': 0xff57,
+    'Left': 0xff51,
+    'Up': 0xff52,
+    'Right': 0xff53,
+    'Down': 0xff54,
+    'Page_Up': 0xff55,
+    'Page_Down': 0xff56,
+    'space': 0x20,
+    'Shift_L': 0xffe1,
+    'Shift': 0xffe1,
+    'Control_L': 0xffe3,
+    'Ctrl': 0xffe3,
+    'Alt_L': 0xffe9,
+    'Alt': 0xffe9,
+    'Super_L': 0xffeb,
+    'Super': 0xffeb,
+    'Menu': 0xff67,
+    'Caps_Lock': 0xffe5,
+}
+for _index in range(1, 13):
+    NAMED_KEYS[f'F{_index}'] = 0xffbe + _index - 1
+SHIFTED_SYMBOLS = set('!@#$%^&*()_+{}|:"<>?~')
+UNSHIFTED_SYMBOLS = set("-=[]\\;',./`")
+
+
+class PortalError(Exception):
+    """A portal request failed or the host refused it."""
+
+
+def _token(prefix: str) -> str:
+    """
+    Return a token that is valid as an object path element.
+
+    Parameters
+    ----------
+    prefix : str
+        Token prefix, identifying the caller in portal dialogs.
+
+    Returns
+    -------
+    str
+        The token.
+    """
+    return f'{prefix}_{secrets.token_hex(4)}'
+
+
+def _unwrap(value: object) -> object:
+    """
+    Unwrap a D-Bus variant, leaving other values untouched.
+
+    Parameters
+    ----------
+    value : object
+        The value to unwrap.
+
+    Returns
+    -------
+    object
+        The unwrapped value.
+    """
+    return value.value if isinstance(value, Variant) else value
+
+
+class Portal:
+    """A connection to the host xdg-desktop-portal over the session bus."""
+    def __init__(self, bus: MessageBus) -> None:
+        """Attach to an already connected message bus."""
+        self.bus = bus
+        self.screencast = None
+        self.remote = None
+
+    @classmethod
+    async def connect(cls) -> Portal:
+        """
+        Connect to the session bus, reporting a missing bus plainly.
+
+        Returns
+        -------
+        Portal
+            The portal connection.
+
+        Raises
+        ------
+        PortalError
+            If no session bus can be reached.
+        """
+        try:
+            return cls(await MessageBus().connect())
+        except Exception as e:
+            msg = f'no session bus: {e}. Start the box with --desktop.'
+            raise PortalError(msg) from e
+
+    async def setup(self) -> None:
+        """
+        Resolve the portal interfaces, reporting an absent portal plainly.
+
+        Raises
+        ------
+        PortalError
+            If the portal is absent from the session bus.
+        """
+        try:
+            info = await self.bus.introspect(PORTAL_BUS, PORTAL_PATH)
+        except (DBusError, asyncio.TimeoutError, OSError) as e:
+            msg = f'no portal on the session bus: {e}.'
+            raise PortalError(msg) from e
+        proxy = self.bus.get_proxy_object(PORTAL_BUS, PORTAL_PATH, info)
+        try:
+            self.screencast = proxy.get_interface(SCREENCAST_IFACE)
+            self.remote = proxy.get_interface(REMOTE_IFACE)
+        except ValueError as e:
+            msg = f'portal interfaces missing: {e}.'
+            raise PortalError(msg) from e
+
+    async def portal_call(self, iface: object, method: str, args: list, timeout: float) -> dict:
+        """
+        Call a portal method that responds through a Request, and wait for it.
+
+        Parameters
+        ----------
+        iface : object
+            The portal D-Bus interface.
+        method : str
+            The portal method name, without the ``call_`` prefix.
+        args : list
+            The method arguments, ending with the options dictionary.
+        timeout : float
+            How long the host approval may take, in seconds.
+
+        Returns
+        -------
+        dict
+            The response results.
+
+        Raises
+        ------
+        PortalError
+            If the host refuses the request or no reply arrives in time.
+        """
+        token = _token('sbclaude')
+        options = dict(args[-1])
+        options['handle_token'] = Variant('s', token)
+        request_path = await getattr(iface, f'call_{method}')(*args[:-1], options)
+        info = await self.bus.introspect(PORTAL_BUS, request_path)
+        proxy = self.bus.get_proxy_object(PORTAL_BUS, request_path, info)
+        request = proxy.get_interface(REQUEST_IFACE)
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+
+        def on_response(response: int, results: dict) -> None:
+            if not future.done():
+                future.set_result((response, results))
+
+        request.on_response(on_response)
+        sys.stderr.write(f'host-desktop: waiting on the host approval for {method}...\n')
+        try:
+            response, results = await asyncio.wait_for(future, timeout)
+        except asyncio.TimeoutError as e:
+            msg = f'{method} drew no reply within {timeout:.0f}s.'
+            raise PortalError(msg) from e
+        if response != 0:
+            msg = f'{method} was refused by the host (response {response}).'
+            raise PortalError(msg)
+        return {key: _unwrap(value) for key, value in results.items()}
+
+    async def close_session(self, session: str) -> None:
+        """Close a portal session, ignoring a session that is already gone."""
+        with contextlib.suppress(DBusError, OSError):
+            await self.bus.call(
+                Message(destination=PORTAL_BUS,
+                        path=session,
+                        interface=SESSION_IFACE,
+                        member='Close'))
+
+    async def interface_version(self, name: str) -> int | None:
+        """
+        Return a portal interface version, or None when it cannot be read.
+
+        Parameters
+        ----------
+        name : str
+            The portal interface name.
+
+        Returns
+        -------
+        int | None
+            The interface version, or ``None`` when it cannot be read.
+        """
+        try:
+            reply = await self.bus.call(
+                Message(destination=PORTAL_BUS,
+                        path=PORTAL_PATH,
+                        interface='org.freedesktop.DBus.Properties',
+                        member='Get',
+                        signature='ss',
+                        body=[name, 'version']))
+            return int(reply.body[0].value)
+        except (DBusError, OSError, IndexError, ValueError):
+            return None
+
+
+async def screencast_streams(portal: Portal) -> tuple[str, list[tuple[int, dict]]]:
+    """
+    Open a ScreenCast session and return its handle with its stream list.
+
+    Parameters
+    ----------
+    portal : Portal
+        The portal connection.
+
+    Returns
+    -------
+    tuple[str, list[tuple[int, dict]]]
+        The session handle and the stream list.
+
+    Raises
+    ------
+    PortalError
+        If the host refuses screen capture or no stream is offered.
+    """
+    results = await portal.portal_call(portal.screencast, 'create_session', [{
+        'session_handle_token': Variant('s', _token('sess'))
+    }], CALL_TIMEOUT)
+    session = str(results['session_handle'])
+    try:
+        modes = await portal.bus.call(
+            Message(destination=PORTAL_BUS,
+                    path=PORTAL_PATH,
+                    interface='org.freedesktop.DBus.Properties',
+                    member='Get',
+                    signature='ss',
+                    body=[SCREENCAST_IFACE, 'AvailableCursorModes']))
+        cursor = (CURSOR_EMBEDDED if int(modes.body[0].value) & CURSOR_EMBEDDED else CURSOR_HIDDEN)
+    except (DBusError, OSError, ValueError):
+        cursor = CURSOR_HIDDEN
+    try:
+        await portal.portal_call(portal.screencast, 'select_sources', [
+            session, {
+                'types': Variant('u', SOURCE_MONITOR),
+                'multiple': Variant('b', value=False),
+                'cursor_mode': Variant('u', cursor)
+            }
+        ], CALL_TIMEOUT)
+        started = await portal.portal_call(portal.screencast, 'start', [session, '', {}],
+                                           START_TIMEOUT)
+    except PortalError:
+        await portal.close_session(session)
+        raise
+    streams = []
+    for node, props in started.get('streams', []):
+        streams.append((int(node), {key: _unwrap(value) for key, value in dict(props).items()}))
+    if not streams:
+        await portal.close_session(session)
+        msg = 'the portal started screen capture with no streams.'
+        raise PortalError(msg)
+    return session, streams
+
+
+async def _select_remote_devices(portal: Portal, session: str, devices: int, *,
+                                 with_screen: bool) -> None:
+    """
+    Select remote devices, sharing the screen with the session when asked.
+
+    Parameters
+    ----------
+    portal : Portal
+        The portal connection.
+    session : str
+        The remote session handle.
+    devices : int
+        The device bitmask to request.
+    with_screen : bool
+        Whether to share the screen with the session.
+    """
+    await portal.portal_call(portal.remote, 'select_devices',
+                             [session, {
+                                 'types': Variant('u', devices)
+                             }], CALL_TIMEOUT)
+    if with_screen:
+        try:
+            await portal.portal_call(portal.screencast, 'select_sources', [
+                session, {
+                    'types': Variant('u', SOURCE_MONITOR),
+                    'multiple': Variant('b', value=False),
+                    'cursor_mode': Variant('u', CURSOR_EMBEDDED)
+                }
+            ], CALL_TIMEOUT)
+        except PortalError as e:
+            sys.stderr.write(f'host-desktop: combined screen sharing failed: {e}\n')
+
+
+async def remote_session(portal: Portal,
+                         devices: int = DEVICE_KEYBOARD | DEVICE_POINTER,
+                         *,
+                         with_screen: bool = True) -> tuple[str, list[tuple[int, dict]]]:
+    """
+    Open a RemoteDesktop session, sharing the screen with it when asked.
+
+    Parameters
+    ----------
+    portal : Portal
+        The portal connection.
+    devices : int
+        The device bitmask to request.
+    with_screen : bool
+        Whether to share the screen with the session.
+
+    Returns
+    -------
+    tuple[str, list[tuple[int, dict]]]
+        The session handle and the stream list.
+
+    Raises
+    ------
+    PortalError
+        If the host refuses the session or grants fewer devices.
+    """
+    results = await portal.portal_call(portal.remote, 'create_session', [{
+        'session_handle_token': Variant('s', _token('sess'))
+    }], CALL_TIMEOUT)
+    session = str(results['session_handle'])
+    try:
+        await _select_remote_devices(portal, session, devices, with_screen=with_screen)
+        started = await portal.portal_call(portal.remote, 'start', [session, '', {}], START_TIMEOUT)
+    except PortalError:
+        await portal.close_session(session)
+        raise
+    granted = int(started.get('devices', 0))
+    if granted & devices != devices:
+        await portal.close_session(session)
+        msg = f'the host granted devices {granted}, fewer than requested.'
+        raise PortalError(msg)
+    streams = []
+    for node, props in started.get('streams', []):
+        streams.append((int(node), {key: _unwrap(value) for key, value in dict(props).items()}))
+    return session, streams
+
+
+def capture_frame(node: int, output: Path) -> None:
+    """
+    Save one frame of a PipeWire stream node to a PNG file.
+
+    Parameters
+    ----------
+    node : int
+        The PipeWire stream node.
+    output : Path
+        The PNG file to write.
+
+    Raises
+    ------
+    PortalError
+        If capture produces no frame.
+    """
+    if not shutil.which('gst-launch-1.0'):
+        msg = 'gst-launch-1.0 is missing from the image.'
+        raise PortalError(msg)
+    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as handle:
+        staging = Path(handle.name)
+    cmd = [
+        'gst-launch-1.0', '-q', 'pipewiresrc', f'path={node}', 'num-buffers=1', '!', 'videoconvert',
+        '!', 'pngenc', 'snapshot=true', '!', 'filesink', f'location={staging}'
+    ]
+    try:
+        sp.run(cmd, check=False, capture_output=True, timeout=CAPTURE_TIMEOUT)
+    except sp.TimeoutExpired as e:
+        msg = f'screen capture timed out after {CAPTURE_TIMEOUT:.0f}s.'
+        raise PortalError(msg) from e
+    if not staging.is_file() or staging.stat().st_size == 0:
+        staging.unlink(missing_ok=True)
+        msg = 'screen capture produced no frame. Retry, or re-approve the dialog.'
+        raise PortalError(msg)
+    staging.replace(output)
+
+
+def stream_info(node: int, props: dict) -> dict:
+    """
+    Describe a stream for the agent, preferring its logical geometry.
+
+    Parameters
+    ----------
+    node : int
+        The PipeWire stream node.
+    props : dict
+        The stream properties.
+
+    Returns
+    -------
+    dict
+        The node with its size and position.
+    """
+    size = props.get('size')
+    position = props.get('position', (0, 0))
+    try:
+        width, height = int(size[0]), int(size[1])
+        pos_x, pos_y = int(position[0]), int(position[1])
+    except (TypeError, IndexError, ValueError):
+        width, height, pos_x, pos_y = 0, 0, 0, 0
+    return {'node': node, 'size': [width, height], 'position': [pos_x, pos_y]}
+
+
+async def pointer_to(portal: Portal, session: str, stream: int, x: float, y: float) -> None:
+    """Move the pointer to absolute stream coordinates."""
+    await portal.bus.call(
+        Message(destination=PORTAL_BUS,
+                path=PORTAL_PATH,
+                interface=REMOTE_IFACE,
+                member='NotifyPointerMotionAbsolute',
+                signature='oa{sv}udd',
+                body=[session, {}, stream, x, y]))
+
+
+async def pointer_button(portal: Portal, session: str, button: int, *, pressed: bool) -> None:
+    """Press or release a pointer button, encoded as a Linux evdev code."""
+    await portal.bus.call(
+        Message(destination=PORTAL_BUS,
+                path=PORTAL_PATH,
+                interface=REMOTE_IFACE,
+                member='NotifyPointerButton',
+                signature='oa{sv}iu',
+                body=[session, {}, button, 1 if pressed else 0]))
+
+
+async def key_sym(portal: Portal, session: str, sym: int, *, pressed: bool) -> None:
+    """Press or release a key by keysym."""
+    await portal.bus.call(
+        Message(destination=PORTAL_BUS,
+                path=PORTAL_PATH,
+                interface=REMOTE_IFACE,
+                member='NotifyKeyboardKeysym',
+                signature='oa{sv}iu',
+                body=[session, {}, sym, 1 if pressed else 0]))
+
+
+async def tap_key(portal: Portal, session: str, sym: int) -> None:
+    """Press and release a key by keysym."""
+    await key_sym(portal, session, sym, pressed=True)
+    await asyncio.sleep(0.02)
+    await key_sym(portal, session, sym, pressed=False)
+
+
+def parse_key(arg: str) -> int:
+    """
+    Parse a key name, a single character, or a numeric keysym.
+
+    Parameters
+    ----------
+    arg : str
+        The key name, character, or number.
+
+    Returns
+    -------
+    int
+        The keysym.
+
+    Raises
+    ------
+    PortalError
+        If the key is unknown.
+    """
+    if arg in NAMED_KEYS:
+        return NAMED_KEYS[arg]
+    if len(arg) == 1:
+        return ord(arg)
+    try:
+        return int(arg, 0)
+    except ValueError as e:
+        msg = f'unknown key {arg!r}.'
+        raise PortalError(msg) from e
+
+
+def type_keysym(char: str) -> tuple[int, bool]:
+    """
+    Map a character to a keysym with a flag for the US shift wrapper.
+
+    Parameters
+    ----------
+    char : str
+        The character to map.
+
+    Returns
+    -------
+    tuple[int, bool]
+        The keysym and whether Shift wraps it.
+    """
+    if char in {'\n', '\r'}:
+        return NAMED_KEYS['Return'], False
+    if char == '\t':
+        return NAMED_KEYS['Tab'], False
+    if char == ' ':
+        return 0x20, False
+    if char.isalpha() and char.isascii():
+        return ord(char), char.isupper()
+    if char.isdigit() and char.isascii():
+        return ord(char), False
+    if char in SHIFTED_SYMBOLS or char in UNSHIFTED_SYMBOLS:
+        return ord(char), char in SHIFTED_SYMBOLS
+    return ord(char), False
+
+
+async def type_text(portal: Portal, session: str, text: str) -> None:
+    """Type text through the remote session, wrapping shifted keys in Shift."""
+    shift = NAMED_KEYS['Shift_L']
+    for char in text:
+        sym, shifted = type_keysym(char)
+        if shifted:
+            await key_sym(portal, session, shift, pressed=True)
+        await tap_key(portal, session, sym)
+        if shifted:
+            await key_sym(portal, session, shift, pressed=False)
+        await asyncio.sleep(0.01)
+
+
+async def click_at(portal: Portal, session: str, stream: int, x: float, y: float,
+                   button: int) -> None:
+    """Move to absolute coordinates and press a pointer button."""
+    await pointer_to(portal, session, stream, x, y)
+    await asyncio.sleep(0.05)
+    await pointer_button(portal, session, button, pressed=True)
+    await asyncio.sleep(0.05)
+    await pointer_button(portal, session, button, pressed=False)
+
+
+def check_sockets() -> list[tuple[str, bool, str]]:
+    """
+    Check the forwarded desktop sockets, returning one row per socket.
+
+    Returns
+    -------
+    list[tuple[str, bool, str]]
+        One label, presence, and path row per socket.
+    """
+    runtime = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}')
+    display = os.environ.get('WAYLAND_DISPLAY', 'wayland-0')
+    wayland = Path(display) if Path(display).is_absolute() else runtime / display
+    rows = [('wayland', wayland.is_socket() or wayland.exists(), str(wayland))]
+    bus_addr = os.environ.get('DBUS_SESSION_BUS_ADDRESS', '')
+    if 'unix:path=' in bus_addr:
+        bus = Path(bus_addr.removeprefix('unix:path=').split(',')[0])
+    else:
+        bus = runtime / 'bus'
+    rows.append(('session bus', bus.is_socket(), str(bus)))
+    pipewire = runtime / 'pipewire-0'
+    rows.append(('pipewire', pipewire.exists(), str(pipewire)))
+    return rows
+
+
+async def portal_versions(portal: Portal) -> tuple[int | None, int | None]:
+    """
+    Describe the host portal, returning its interface versions.
+
+    Parameters
+    ----------
+    portal : Portal
+        The portal connection.
+
+    Returns
+    -------
+    tuple[int | None, int | None]
+        The ScreenCast and RemoteDesktop versions.
+
+    Raises
+    ------
+    PortalError
+        If the bus has no portal.
+    """
+    owned = await portal.bus.call(
+        Message(destination='org.freedesktop.DBus',
+                path='/org/freedesktop/DBus',
+                interface='org.freedesktop.DBus',
+                member='NameHasOwner',
+                signature='s',
+                body=[PORTAL_BUS]))
+    if not owned.body[0]:
+        msg = 'the bus has no org.freedesktop.portal.Desktop.'
+        raise PortalError(msg)
+    await portal.setup()
+    return (await portal.interface_version(SCREENCAST_IFACE), await
+            portal.interface_version(REMOTE_IFACE))
+
+
+async def cmd_check() -> int:
+    """
+    Verify the desktop forwarding and describe the host portal.
+
+    Returns
+    -------
+    int
+        Zero when every socket and the portal are present, else one.
+    """
+    failed = False
+    for label, present, path in check_sockets():
+        sys.stdout.write(f'{"ok" if present else "missing"}  {label}: {path}\n')
+        failed = failed or not present
+    try:
+        portal = await Portal.connect()
+    except PortalError as e:
+        sys.stdout.write(f'missing  portal: {e}\n')
+        return 1
+    try:
+        screencast, remote = await portal_versions(portal)
+        sys.stdout.write(f'ok  portal screencast version: {screencast}\n')
+        sys.stdout.write(f'ok  portal remote desktop version: {remote}\n')
+    except (PortalError, DBusError, OSError) as e:
+        sys.stdout.write(f'missing  portal: {e}\n')
+        return 1
+    return 1 if failed else 0
+
+
+async def cmd_shot(path: Path) -> int:
+    """
+    Capture the host desktop to a PNG file and describe its geometry.
+
+    Parameters
+    ----------
+    path : Path
+        The PNG file to write.
+
+    Returns
+    -------
+    int
+        Zero on success.
+    """
+    portal = await Portal.connect()
+    await portal.setup()
+    session, streams = await screencast_streams(portal)
+    try:
+        node, props = streams[0]
+        capture_frame(node, path)
+    finally:
+        await portal.close_session(session)
+    info = stream_info(node, props)
+    info['path'] = str(path)
+    sys.stdout.write(json.dumps(info, indent=2, sort_keys=True) + '\n')
+    return 0
+
+
+async def with_input(*, with_screen: bool) -> tuple[Portal, str, int]:
+    """
+    Open a remote session, yielding the portal, session, and stream node.
+
+    Parameters
+    ----------
+    with_screen : bool
+        Whether to share the screen with the session.
+
+    Returns
+    -------
+    tuple[Portal, str, int]
+        The portal, the session handle, and the stream node.
+    """
+    portal = await Portal.connect()
+    await portal.setup()
+    session, streams = await remote_session(portal, with_screen=with_screen)
+    node = streams[0][0] if streams else 0
+    if not streams:
+        sys.stderr.write('host-desktop: no screen stream; coordinates may miss.\n')
+    return portal, session, node
+
+
+async def cmd_click(x: float, y: float, button: int) -> int:
+    """
+    Press a pointer button at absolute desktop coordinates.
+
+    Parameters
+    ----------
+    x : float
+        The horizontal position in stream pixels.
+    y : float
+        The vertical position in stream pixels.
+    button : int
+        The evdev button code.
+
+    Returns
+    -------
+    int
+        Zero on success.
+    """
+    portal, session, node = await with_input(with_screen=True)
+    try:
+        await click_at(portal, session, node, x, y, button)
+    finally:
+        await portal.close_session(session)
+    return 0
+
+
+async def cmd_move(x: float, y: float) -> int:
+    """
+    Move the pointer to absolute desktop coordinates.
+
+    Parameters
+    ----------
+    x : float
+        The horizontal position in stream pixels.
+    y : float
+        The vertical position in stream pixels.
+
+    Returns
+    -------
+    int
+        Zero on success.
+    """
+    portal, session, node = await with_input(with_screen=True)
+    try:
+        await pointer_to(portal, session, node, x, y)
+    finally:
+        await portal.close_session(session)
+    return 0
+
+
+async def cmd_key(arg: str) -> int:
+    """
+    Press and release one key.
+
+    Parameters
+    ----------
+    arg : str
+        The key name, character, or number.
+
+    Returns
+    -------
+    int
+        Zero on success.
+    """
+    portal = await Portal.connect()
+    await portal.setup()
+    session, _ = await remote_session(portal, with_screen=False)
+    try:
+        await tap_key(portal, session, parse_key(arg))
+    finally:
+        await portal.close_session(session)
+    return 0
+
+
+async def cmd_type(text: str) -> int:
+    """
+    Type text through the remote session.
+
+    Parameters
+    ----------
+    text : str
+        The text to type.
+
+    Returns
+    -------
+    int
+        Zero on success.
+    """
+    portal = await Portal.connect()
+    await portal.setup()
+    session, _ = await remote_session(portal, with_screen=False)
+    try:
+        await type_text(portal, session, text)
+    finally:
+        await portal.close_session(session)
+    return 0
+
+
+async def cmd_scroll(dx: float, dy: float) -> int:
+    """
+    Scroll by a relative axis delta.
+
+    Parameters
+    ----------
+    dx : float
+        The horizontal scroll delta.
+    dy : float
+        The vertical scroll delta.
+
+    Returns
+    -------
+    int
+        Zero on success.
+    """
+    portal = await Portal.connect()
+    await portal.setup()
+    session, _ = await remote_session(portal, with_screen=False)
+    try:
+        await portal.bus.call(
+            Message(destination=PORTAL_BUS,
+                    path=PORTAL_PATH,
+                    interface=REMOTE_IFACE,
+                    member='NotifyPointerAxis',
+                    signature='oa{sv}dd',
+                    body=[session, {
+                        'finish': Variant('b', value=True)
+                    }, dx, dy]))
+    finally:
+        await portal.close_session(session)
+    return 0
+
+
+def _input_task(path: str, payload: dict, portal: Portal, session: str,
+                node: int) -> Coroutine[Any, Any, None]:
+    """
+    Build the input task for a serve request path.
+
+    Parameters
+    ----------
+    path : str
+        The request path.
+    payload : dict
+        The request JSON body.
+    portal : Portal
+        The portal connection.
+    session : str
+        The remote session handle.
+    node : int
+        The screen stream node.
+
+    Returns
+    -------
+    Coroutine[Any, Any, None]
+        The input task.
+    """
+    match path:
+        case '/click':
+            return click_at(portal, session, node, float(payload['x']), float(payload['y']),
+                            BUTTONS.get(str(payload.get('button', '1')), BTN_LEFT))
+        case '/move':
+            return pointer_to(portal, session, node, float(payload['x']), float(payload['y']))
+        case '/key':
+            return tap_key(portal, session, parse_key(str(payload['key'])))
+        case _:
+            return type_text(portal, session, str(payload.get('text', '')))
+
+
+async def cmd_serve(port: int) -> int:
+    """
+    Maintain one combined session open and serve shots and input over HTTP.
+
+    Parameters
+    ----------
+    port : int
+        The loopback port to serve on.
+
+    Returns
+    -------
+    int
+        Zero on success.
+    """
+    portal = await Portal.connect()
+    await portal.setup()
+    session, streams = await remote_session(portal)
+    if not streams:
+        sys.stderr.write('host-desktop: combined sharing gave no stream; opening screen '
+                         'capture alone.\n')
+        await portal.close_session(session)
+        session, streams = await screencast_streams(portal)
+        input_session: str | None = None
+        _, fallback = await remote_session(portal, with_screen=False)
+        input_session = fallback
+    else:
+        input_session = session
+    node = streams[0][0]
+    worker = asyncio.get_running_loop()
+
+    def describe() -> dict:
+        return {
+            'streams': list(starmap(stream_info, streams)),
+            'node': node,
+        }
+
+    class Handler(BaseHTTPRequestHandler):
+        """Serve one desktop session over loopback HTTP."""
+        def log_message(self, *args: object) -> None:
+            """Keep request logging on stderr without the default formatting."""
+
+        def _send(self, code: int, body: bytes, content: str) -> None:
+            self.send_response(code)
+            self.send_header('Content-Type', content)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self) -> None:
+            match self.path:
+                case '/info':
+                    self._send(200, json.dumps(describe()).encode(), 'application/json')
+                case '/shot' | '/shot.png':
+                    try:
+                        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as handle:
+                            out = Path(handle.name)
+                        asyncio.run_coroutine_threadsafe(_shot_to(out), worker).result(60)
+                        self._send(200, out.read_bytes(), 'image/png')
+                        out.unlink(missing_ok=True)
+                    except (PortalError, OSError) as e:
+                        self._send(502, str(e).encode(), 'text/plain')
+                case _:
+                    self._send(404, b'unknown path', 'text/plain')
+
+        def do_POST(self) -> None:
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                payload = json.loads(self.rfile.read(length) or b'{}')
+            except (ValueError, OSError) as e:
+                self._send(400, f'invalid JSON: {e}'.encode(), 'text/plain')
+                return
+            if self.path not in {'/click', '/move', '/key', '/type'}:
+                self._send(404, b'unknown path', 'text/plain')
+                return
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    _input_task(self.path, payload, portal, input_session, node), worker)
+                future.result(60)
+                self._send(200, b'{"ok": true}', 'application/json')
+            except (PortalError, DBusError, OSError, KeyError, ValueError) as e:
+                self._send(502, str(e).encode(), 'text/plain')
+
+    async def _shot_to(out: Path) -> None:
+        await asyncio.to_thread(capture_frame, node, out)
+
+    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    sys.stderr.write(f'host-desktop: serving the session on 127.0.0.1:{port}\n')
+    try:
+        await asyncio.to_thread(server.serve_forever)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        server.shutdown()
+        await portal.close_session(session)
+        if input_session != session:
+            await portal.close_session(input_session)
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """
+    Build the command line parser.
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        The parser.
+    """
+    parser = argparse.ArgumentParser(
+        prog='host-desktop',
+        description='See and control the host desktop through xdg-desktop-portal.')
+    sub = parser.add_subparsers(dest='command', required=True)
+    sub.add_parser('check', help='Verify the forwarded sockets and the host portal.')
+    shot = sub.add_parser('shot', help='Capture the host desktop to a PNG file.')
+    shot.add_argument('output', type=Path, help='PNG file to write.')
+    click = sub.add_parser('click', help='Press a pointer button at desktop coordinates.')
+    click.add_argument('x', type=float, help='Horizontal position in stream pixels.')
+    click.add_argument('y', type=float, help='Vertical position in stream pixels.')
+    click.add_argument('--button',
+                       default='1',
+                       help='Pointer button: 1, 2, 3, left, middle, or right.')
+    move = sub.add_parser('move', help='Move the pointer to desktop coordinates.')
+    move.add_argument('x', type=float, help='Horizontal position in stream pixels.')
+    move.add_argument('y', type=float, help='Vertical position in stream pixels.')
+    key = sub.add_parser('key', help='Press and release one key by name or keysym.')
+    key.add_argument('name', help='Key name (Return, Escape, Tab), a character, or a number.')
+    typed = sub.add_parser('type', help='Type text through the remote session.')
+    typed.add_argument('text', help='Text to type.')
+    scroll = sub.add_parser('scroll', help='Scroll by a relative axis delta.')
+    scroll.add_argument('dy', type=float, help='Vertical scroll delta.')
+    scroll.add_argument('--dx', type=float, default=0.0, help='Horizontal scroll delta.')
+    serve = sub.add_parser(
+        'serve', help='Maintain one approved session and serve shots and input over HTTP.')
+    serve.add_argument('--port', type=int, default=8901, help='Loopback port to serve on.')
+    return parser
+
+
+async def dispatch(args: argparse.Namespace) -> int:
+    """
+    Run the requested subcommand.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        The parsed arguments.
+
+    Returns
+    -------
+    int
+        The subcommand exit code.
+
+    Raises
+    ------
+    PortalError
+        If the subcommand or its arguments are invalid.
+    """
+    match args.command:
+        case 'check':
+            return await cmd_check()
+        case 'shot':
+            return await cmd_shot(args.output)
+        case 'click':
+            button = BUTTONS.get(str(args.button))
+            if button is None:
+                msg = f'unknown button {args.button!r}.'
+                raise PortalError(msg)
+            return await cmd_click(args.x, args.y, button)
+        case 'move':
+            return await cmd_move(args.x, args.y)
+        case 'key':
+            return await cmd_key(args.name)
+        case 'type':
+            return await cmd_type(args.text)
+        case 'scroll':
+            return await cmd_scroll(args.dx, args.dy)
+        case 'serve':
+            return await cmd_serve(args.port)
+        case _:
+            msg = f'unknown command {args.command!r}.'
+            raise PortalError(msg)
+
+
+def main() -> int:
+    """
+    Entry point, mapping portal failures to exit code 1.
+
+    Returns
+    -------
+    int
+        The process exit code.
+    """
+    try:
+        return asyncio.run(dispatch(build_parser().parse_args()))
+    except PortalError as e:
+        sys.stderr.write(f'host-desktop: {e}\n')
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -225,6 +225,8 @@ The object form is required. A bare ``"allow"`` string is read as a map of its c
 """
 DRI_DEVICE_DIR = Path('/dev/dri')
 """Host DRM device directory; its render nodes are passed through for GPU rendering."""
+PIPEWIRE_SOCKET_NAMES = ('pipewire-0', 'pipewire-0-manager')
+"""PipeWire socket names forwarded by ``--desktop`` for portal screen capture."""
 VENV_DIR_NAME = '.sbclaude-venv'
 """Name of the box's virtualenv directory, created beside the host's ``.venv``."""
 HOST_VENV_DIR_NAME = '.venv'
@@ -330,6 +332,8 @@ class RunSpec:
     """Whether to mount the Android SDK and related devices."""
     use_docker: bool = False
     """Whether to forward the host Docker daemon socket (root on the host, in effect)."""
+    use_desktop: bool = False
+    """Whether to forward the host desktop session for portal screen capture and input."""
     use_gpg: bool = False
     """Whether to mount the host GnuPG home and agent socket for commit signing."""
     use_ghidra: bool = False
@@ -825,7 +829,8 @@ def build_run_argv(spec: RunSpec, *, state: str | None = None) -> tuple[list[str
         (spec.use_gpg, lambda: _gpg_args(home, uid)),
         (spec.use_keyring, lambda: _keyring_args(uid)),
         (bool(spec.keyring_keys), lambda: _keyring_secret_args(spec.keyring_keys)),
-        (spec.use_wayland, lambda: _wayland_args(uid)),
+        (spec.use_wayland and not spec.use_desktop, lambda: _wayland_args(uid)),
+        (spec.use_desktop, lambda: _desktop_args(uid)),
         (spec.use_x11, lambda: _x11_args(uid, user)),
         (spec.distro == 'gentoo', _gentoo_args),
     )
@@ -1276,6 +1281,64 @@ def _keyring_secret_args(keys: Sequence[str]) -> list[str]:
     return args
 
 
+def _session_bus_socket(uid: int) -> Path | None:
+    """
+    Locate the host D-Bus session bus socket.
+
+    The address is authoritative when it is set and identifies a path, because a session may
+    place the socket outside the runtime directory. Everything else falls back to the usual
+    location under the runtime directory.
+
+    Parameters
+    ----------
+    uid : int
+        Host user ID, used to locate the bus socket.
+
+    Returns
+    -------
+    Path | None
+        The socket path when one exists, else ``None``.
+    """
+    address = os.environ.get('DBUS_SESSION_BUS_ADDRESS', '')
+    runtime = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{uid}')
+    sock = Path(
+        address.removeprefix('unix:path=').split(',')[0]) if 'unix:path=' in address else (runtime /
+                                                                                           'bus')
+    return sock if sock.is_socket() else None
+
+
+def _session_bus_args(uid: int, *, label: str) -> list[str]:
+    """
+    Forward the host D-Bus session bus into the box.
+
+    Parameters
+    ----------
+    uid : int
+        Host user ID, used to place the socket under the container's ``/run/user/<uid>``.
+    label : str
+        Flag label used in the warning when no session bus socket exists.
+
+    Returns
+    -------
+    list[str]
+        ``docker run`` arguments, or an empty list when no session bus socket exists.
+    """
+    if (sock := _session_bus_socket(uid)) is None:
+        runtime = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{uid}')
+        address = os.environ.get('DBUS_SESSION_BUS_ADDRESS', '')
+        missing = (Path(address.removeprefix('unix:path=').split(',')[0])
+                   if 'unix:path=' in address else runtime / 'bus')
+        sys.stderr.write(f'sbclaude: {label}: no session bus socket at {missing}; skipping\n')
+        return []
+    # Re-homed under the container's own runtime directory, and read-write because a bus client
+    # writes to the socket.
+    target = f'/run/user/{uid}/bus'
+    return [
+        *_v(sock, target), '-e', f'DBUS_SESSION_BUS_ADDRESS=unix:path={target}', '-e',
+        f'XDG_RUNTIME_DIR=/run/user/{uid}'
+    ]
+
+
 def _keyring_args(uid: int) -> list[str]:
     """
     Forward the D-Bus session bus, which is what reaches the host Secret Service.
@@ -1299,23 +1362,7 @@ def _keyring_args(uid: int) -> list[str]:
     list[str]
         ``docker run`` arguments, or an empty list when no session bus socket exists.
     """
-    address = os.environ.get('DBUS_SESSION_BUS_ADDRESS', '')
-    runtime = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{uid}')
-    # The address is the authority when it is set and names a path, because a session may place the
-    # socket outside the runtime directory. Everything else falls back to the usual location.
-    sock = Path(
-        address.removeprefix('unix:path=').split(',')[0]) if 'unix:path=' in address else (runtime /
-                                                                                           'bus')
-    if not sock.is_socket():
-        sys.stderr.write(f'sbclaude: --keyring: no session bus socket at {sock}; skipping\n')
-        return []
-    # Re-homed under the container's own runtime directory, and read-write because a bus client
-    # writes to the socket.
-    target = f'/run/user/{uid}/bus'
-    return [
-        *_v(sock, target), '-e', f'DBUS_SESSION_BUS_ADDRESS=unix:path={target}', '-e',
-        f'XDG_RUNTIME_DIR=/run/user/{uid}'
-    ]
+    return _session_bus_args(uid, label='--keyring')
 
 
 def _wayland_args(uid: int) -> list[str]:
@@ -1351,6 +1398,70 @@ def _wayland_args(uid: int) -> list[str]:
         *_v(sock, target), '-e', f'WAYLAND_DISPLAY={sock.name}', '-e',
         f'XDG_RUNTIME_DIR=/run/user/{uid}'
     ]
+
+
+def _pipewire_args(uid: int) -> list[str]:
+    """
+    Forward the host PipeWire sockets.
+
+    The ScreenCast portal hands the box a PipeWire stream, and the box reads frames from the
+    host PipeWire daemon. Without the socket the portal session starts and the box has no
+    stream to receive pixels from.
+
+    Parameters
+    ----------
+    uid : int
+        Host user ID, used to locate the sockets and to place them in the container.
+
+    Returns
+    -------
+    list[str]
+        ``docker run`` arguments, or an empty list when the main socket is absent.
+    """
+    runtime = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{uid}')
+    args: list[str] = []
+    for socket_name in PIPEWIRE_SOCKET_NAMES:
+        sock = runtime / socket_name
+        if sock.exists():
+            # Re-homed under the container's own runtime directory, read-write because a
+            # PipeWire client writes to the socket.
+            args += [
+                *_v(sock, f'/run/user/{uid}/{socket_name}'), '-e',
+                f'XDG_RUNTIME_DIR=/run/user/{uid}'
+            ]
+    if not args:
+        sys.stderr.write(f'sbclaude: --desktop: no PipeWire socket at {runtime / "pipewire-0"}; '
+                         'screen capture will not work\n')
+    return args
+
+
+def _desktop_args(uid: int) -> list[str]:
+    """
+    Forward the host desktop session for portal screen capture and input.
+
+    The Wayland socket identifies the compositor, the D-Bus session bus carries the
+    ScreenCast and RemoteDesktop portal requests, and the PipeWire socket carries the captured
+    frames back. On KDE Plasma the portal backend shows an approval dialog on the host, and the
+    agent sees and controls the desktop only after approval.
+
+    This is the widest desktop grant sbclaude offers. ``--desktop`` exposes every service
+    on the session bus rather than one portal, and an approved RemoteDesktop session injects
+    input across the whole host session.
+
+    Parameters
+    ----------
+    uid : int
+        Host user ID, used to place the sockets under the container's ``/run/user/<uid>``.
+
+    Returns
+    -------
+    list[str]
+        ``docker run`` arguments.
+    """
+    sys.stderr.write('sbclaude: --desktop: the box can see and control the host desktop once the '
+                     'portal approval on the host is accepted. Prefer a dedicated host user for '
+                     'unattended sessions.\n')
+    return [*_wayland_args(uid), *_session_bus_args(uid, label='--desktop'), *_pipewire_args(uid)]
 
 
 def _x11_args(uid: int, user: str) -> list[str]:

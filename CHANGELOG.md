@@ -11,6 +11,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `--desktop` (config key `desktop`) forwards the host desktop session into the box. The
+  agent can see and control the session. `--desktop` forwards the Wayland socket, the D-Bus
+  session bus, and the PipeWire sockets together, and screen capture and input travel over
+  the ScreenCast and RemoteDesktop portals. The image ships a `host-desktop` helper driving
+  those portals (`check`, `shot`, `click`, `move`, `key`, `type`, `scroll`, and a `serve`
+  mode retaining one approved session behind a loopback HTTP API). Each fresh session shows
+  one approval dialog on the host. On KDE Plasma the approval can persist.
 - `--agent opencode` (config key `agent`) runs opencode in the box instead of Claude Code. The host
   `opencode` on `PATH` is mounted, or the latest release is downloaded into the sbclaude cache when
   `PATH` has none. Every tool is allowed through `OPENCODE_PERMISSION`. opencode's XDG directories

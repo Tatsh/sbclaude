@@ -143,6 +143,11 @@ def main(ctx: click.Context) -> None:
               'use_wayland',
               is_flag=True,
               help='Forward the Wayland socket for GUIs (preferred over --x11).')
+@click.option('--desktop',
+              'use_desktop',
+              is_flag=True,
+              help='Forward the host desktop session for portal screen capture and input. The '
+              'agent can see and control the session after host approval.')
 @click.option('--x11', 'use_x11', is_flag=True, help='Forward DISPLAY + XAUTHORITY for GUIs.')
 @click.option('--ssh',
               'use_ssh',
@@ -217,6 +222,7 @@ def run(
     use_keyring: bool,
     keyring_keys: str,
     use_wayland: bool,
+    use_desktop: bool,
     use_x11: bool,
     use_ssh: bool,
     use_gpg: bool,
@@ -240,6 +246,7 @@ def run(
     use_ios = use_ios or cfg.ios
     use_keyring = use_keyring or cfg.keyring
     use_wayland = use_wayland or cfg.wayland
+    use_desktop = use_desktop or cfg.desktop
     use_x11 = use_x11 or cfg.x11
     use_ssh = use_ssh or cfg.ssh
     use_gpg = use_gpg or cfg.gpg
@@ -277,6 +284,7 @@ def run(
                              use_keyring=use_keyring,
                              keyring_keys=[*cfg.keyring_keys, *_split_keys(keyring_keys)],
                              use_wayland=use_wayland,
+                             use_desktop=use_desktop,
                              use_x11=use_x11,
                              use_ssh=use_ssh,
                              use_gpg=use_gpg,
