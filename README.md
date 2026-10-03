@@ -236,15 +236,15 @@ pin its own defaults. All keys optional:
 
 ```toml
 [tool.sbclaude]
-desktop = true   # forward the host desktop session for portal capture and input
-gpg = true       # mount the GnuPG home + agent for signing
-keyring = true   # forward the D-Bus session bus to reach the host keyring
-network = "host" # default; "bridge" to isolate the box's network
-re = true        # enable the Ghidra + Android mounts together
-ssh = true       # mount ~/.ssh read-only + forward the ssh-agent for SSH git remotes
-sudo = true      # passwordless sudo in the box (drops no-new-privileges)
-wayland = true   # forward the Wayland socket for GUI apps
-x11 = true       # forward X11 for GUI apps
+desktop = true  # forward the host desktop session for portal capture and input
+gpg = true  # mount the GnuPG home + agent for signing
+keyring = true  # forward the D-Bus session bus to reach the host keyring
+network = 'host'  # default; "bridge" to isolate the box's network
+re = true  # enable the Ghidra + Android mounts together
+ssh = true  # mount ~/.ssh read-only + forward the ssh-agent for SSH git remotes
+sudo = true  # passwordless sudo in the box (drops no-new-privileges)
+wayland = true  # forward the Wayland socket for GUI apps
+x11 = true  # forward X11 for GUI apps
 # image = "custom:latest"         # force a different image
 # debian_mirror = "http://ftp.us.debian.org/debian" # apt mirror for image builds
 # memory = "8g"                   # override the auto host-RAM cap ("0" disables)
@@ -257,13 +257,13 @@ x11 = true       # forward X11 for GUI apps
 # default_profile = "work"        # apply this profile when --profile is absent
 # gentoo = true                   # run the Gentoo image for ebuild work (same as --gentoo)
 # fullscreen = false              # do not force the fullscreen TUI (keeps start-up errors visible)
-keyring_keys = ["GH_TOKEN=gh:github.com"]          # copy only these host secrets in, as env vars
-pass_env = ["AWS_REGION"]                          # forward host vars (AWS_PROFILE is default)
-ro = ["~/dev*", "~/ghidra_scripts", "~/Downloads"] # read-only mounts (globs + ~ ok)
-rw = []                                            # the project dir is always rw automatically
+keyring_keys = ['GH_TOKEN=gh:github.com']  # copy only these host secrets in, as env vars
+pass_env = ['AWS_REGION']  # forward host vars (AWS_PROFILE is default)
+ro = ['~/dev*', '~/ghidra_scripts', '~/Downloads']  # read-only mounts (globs + ~ ok)
+rw = []  # the project dir is always rw automatically
 
-[tool.sbclaude.env] # inject fixed vars (e.g. Amazon Bedrock)
-CLAUDE_CODE_USE_BEDROCK = "1"
+[tool.sbclaude.env]  # inject fixed vars (e.g. Amazon Bedrock)
+CLAUDE_CODE_USE_BEDROCK = '1'
 ```
 
 The toggle keys `re`, `ghidra`, `android`, `docker`, `gentoo`, `gpu`, `usb`, `ios`, `keyring`,
@@ -277,11 +277,11 @@ and store any key from `[tool.sbclaude]`, under a `[tool.sbclaude.profile]` tabl
 
 ```toml
 [tool.sbclaude.profile]
-network = "bridge"
+network = 'bridge'
 ssh = true
 
 [tool.sbclaude.profile.env]
-ENV_VAR = "some value"
+ENV_VAR = 'some value'
 ```
 
 Select one with `sbclaude run --profile <name>` (`build` accepts the flag as well), or set
@@ -350,8 +350,8 @@ environment survives the box without anything being written into the project:
 
 ```toml
 [tool.sbclaude]
-docker_args = ["-v", "sbclaude-venv-cache:/venv-cache"]
-venv_dir = "/venv-cache"
+docker_args = ['-v', 'sbclaude-venv-cache:/venv-cache']
+venv_dir = '/venv-cache'
 ```
 
 `DIR` gets one subdirectory per project, named after it with a digest of its absolute path
