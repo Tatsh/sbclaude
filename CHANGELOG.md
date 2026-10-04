@@ -48,6 +48,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `sbclaude run` and `sbclaude build`. Profile values override the global config and the
   project `pyproject.toml` overrides both, with `[env]` tables merged key by key.
 
+### Removed
+
+- Support for Python 3.10. Python 3.11 or later is now required.
+
 ### Fixed
 
 - `--gpg` mounts the directory holding the host agent socket rather than the socket file. A file
