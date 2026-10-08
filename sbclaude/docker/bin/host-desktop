@@ -178,7 +178,7 @@ class Portal:
         """
         try:
             info = await self.bus.introspect(PORTAL_BUS, PORTAL_PATH)
-        except (DBusError, asyncio.TimeoutError, OSError) as e:
+        except (TimeoutError, DBusError, OSError) as e:
             msg = f'no portal on the session bus: {e}.'
             raise PortalError(msg) from e
         proxy = self.bus.get_proxy_object(PORTAL_BUS, PORTAL_PATH, info)
@@ -232,7 +232,7 @@ class Portal:
         sys.stderr.write(f'host-desktop: waiting on the host approval for {method}...\n')
         try:
             response, results = await asyncio.wait_for(future, timeout)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             msg = f'{method} drew no reply within {timeout:.0f}s.'
             raise PortalError(msg) from e
         if response != 0:
