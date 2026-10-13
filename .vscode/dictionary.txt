@@ -332,6 +332,7 @@ winget
 wireit
 wiswa
 wiswa's
+worktrees
 writable
 xauth
 xauthority

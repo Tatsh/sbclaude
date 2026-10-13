@@ -30,11 +30,11 @@
 
 <!-- WISWA-GENERATED-README:STOP -->
 
-`sbclaude` runs **Claude Code** (or [opencode](#opencode)) inside a throwaway Docker container
-with the bash sandbox and permission prompts **disabled**, against a configurable set of host bind
-mounts. The container stores nothing (`--rm`); everything lives on the host. A
-[Gentoo box](#gentoo-box---gentoo) is the exception, and is saved between sessions. You only ever
-invoke `sbclaude`. It manages its own image and containers via the Docker SDK.
+`sbclaude` runs **Claude Code** (or [opencode](#opencode), or [Muse Code](#muse-code)) inside a
+throwaway Docker container with the bash sandbox and permission prompts **disabled**, against a
+configurable set of host bind mounts. The container stores nothing (`--rm`); everything is stored
+on the host. A [Gentoo box](#gentoo-box---gentoo) is the exception, and is saved between sessions.
+You only ever invoke `sbclaude`. It manages its image and containers via the Docker SDK.
 
 **The host must be Linux.** The host copy of `claude` is bind-mounted into a Linux container and
 executed there, so the host must supply an ELF build of it (a Mac's own `claude` is Mach-O and
@@ -46,9 +46,10 @@ refusal can be lifted for a host you are prepared to set up by hand — see
 [Running from a non-Linux host](#running-from-a-non-linux-host) — but nothing beyond Linux is
 tested or supported.
 
-Two images are built on demand from one Dockerfile. `sbclaude:latest` runs Claude Code and
-`sbclaude:opencode` runs opencode. They share every layer except the last, where the Claude Code
-image adds its managed settings and cc-session-recover. Both bundle everyday coding tools
+Three images are built on demand from one Dockerfile. `sbclaude:latest` runs Claude Code,
+`sbclaude:opencode` runs opencode, and `sbclaude:muse` runs Muse Code. They share every layer
+except the last, where the Claude Code image adds its managed settings and cc-session-recover.
+All bundle everyday coding tools
 (Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv, jq), formatters and
 linters kept at their latest upstream release (clang-format, jsonnet, jsonnetfmt, shellcheck), Qt 6
 development (`qt6-base-dev` plus ninja), a Rust toolchain (rustup stable with the
@@ -124,6 +125,7 @@ sbclaude run -r /data -w ~/scratch   # extra read-only / read-write mounts
 sbclaude run --re --x11           # Ghidra/Android mounts + GUI passthrough
 sbclaude run -- --version         # everything after -- goes to claude
 sbclaude run --agent opencode     # run opencode instead of claude
+sbclaude run --agent muse         # run Muse Code instead of claude
 sbclaude ls                       # list running sbclaude containers
 sbclaude stop [--all]             # stop this project's boxes (or all with --all)
 sbclaude shell                    # debug shell in this project's box, as your user
@@ -205,6 +207,7 @@ more than one is running).
 | `--gentoo`          | Gentoo image for ebuild work, saved between sessions (implies `--sudo`)          |
 | `--venv-dir DIR`    | put the box's virtualenv in `DIR` (e.g. a volume) instead of beside the project  |
 | `--agent opencode`  | run opencode instead of claude (host `PATH`, or the latest release downloaded)   |
+| `--agent muse`      | run Muse Code instead of claude (host `PATH`)                                    |
 | `--claude-binary`   | mount this `claude` build instead of the first one on `PATH`                     |
 | `--no-modify`       | stop sbclaude writing anything into the project directory                        |
 | `--no-fullscreen`   | do not force the fullscreen TUI, so a failing session's output survives          |
@@ -254,6 +257,7 @@ x11 = true  # forward X11 for GUI apps
 # venv_dir = "/venv-cache"        # hold the box's virtualenv here (pair with a docker_args volume)
 # claude_binary = "~/bin/claude"  # mount this claude build rather than the first one on PATH
 # agent = "opencode"              # run opencode instead of claude (same as --agent opencode)
+# agent = "muse"                  # run Muse Code instead of claude (same as --agent muse)
 # default_profile = "work"        # apply this profile when --profile is absent
 # gentoo = true                   # run the Gentoo image for ebuild work (same as --gentoo)
 # fullscreen = false              # do not force the fullscreen TUI (keeps start-up errors visible)
@@ -435,14 +439,34 @@ For opencode, `~/.claude` is not mounted, `settings.json` is not patched, `--no-
 effect, and `--session-recover` is ignored with a note. The box runs `sbclaude:opencode`, an image
 without Claude Code's managed settings or cc-session-recover.
 
+## Muse Code
+
+`--agent muse` (config key `agent`) runs Muse Code in the box instead of Claude Code. The host
+`muse` on `PATH` is mounted read-only, as `claude` is. sbclaude does not download Muse Code, and a
+host without `muse` on `PATH` cannot start a Muse Code box.
+
+The box passes `--yolo`. The flag disables approval prompts and the Muse Code sandbox, and trusts
+the workspace. `muse` rejects a root option before a subcommand. The flag goes before the arguments
+of the interactive TUI and after `exec` and `resume`. Utility subcommands (`login`, `auth`, `skills`,
+and the rest) run without it. `-e SBCLAUDE_SKIP_PERMISSIONS=0` omits the flag.
+
+Muse Code stores its settings in `~/.config/muse`, its session logs in `~/.local/share/muse`, and
+its projects home and session worktrees in `~/.muse`. Each is created on the host when missing and
+mounted read-write. A directory the host relocates with `XDG_CONFIG_HOME` or `XDG_DATA_HOME` is
+mounted at the default path inside the box.
+
+For Muse Code, `~/.claude` is not mounted, `settings.json` is not patched, `--no-fullscreen` has
+no effect, and `--session-recover` is ignored with a note. The box runs `sbclaude:muse`, an image
+without Claude Code's managed settings or cc-session-recover.
+
 ## Gentoo box (`--gentoo`)
 
 `--gentoo` (config key `gentoo`) runs an image built from a Gentoo stage3, for editing ebuilds and
 testing their builds. It ships pkgcheck, pkgdev, gentoolkit, portage-utils, git, and sudo. The
 Debian image's RE toolchain, `webshot`, Qt, and Rust are absent, although their run flags still
 mount what they mount. `sbclaude build --gentoo` builds the image ahead of time, and the first
-`run --gentoo` builds it otherwise. The images are `sbclaude-gentoo:latest` and
-`sbclaude-gentoo:opencode`.
+`run --gentoo` builds it otherwise. The images are `sbclaude-gentoo:latest`,
+`sbclaude-gentoo:opencode`, and `sbclaude-gentoo:muse`.
 
 emerge and ebuild run as root, and `--gentoo` therefore implies `--sudo`.
 

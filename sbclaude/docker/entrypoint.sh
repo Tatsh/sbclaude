@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Recreate the host user's identity inside the container, then drop privileges
-# and launch Claude Code (or opencode) with no permission prompts.
+# and launch Claude Code (or opencode, or muse) with no permission prompts.
 #
 # Why mirror the host identity (UID/GID/USER/HOME) instead of using a baked-in
 # user? Two reasons:
@@ -214,11 +214,11 @@ fi
 # ~/.local/bin/claude. We bind-mount it at /usr/local/bin/claude instead, so create the expected
 # symlink to silence the "claude command not found at ~/.local/bin/claude" warning.
 #
-# opencode's XDG directories are mounted beneath ~/.cache and ~/.local, and Docker creates their
-# parents root-owned for the same reason as ~/.config above. Only the parents are re-owned, never
-# recursively, because the directories inside them are host paths.
+# The XDG directories of opencode and muse are mounted beneath ~/.cache and ~/.local, and Docker
+# creates their parents root-owned for the same reason as ~/.config above. Only the parents are
+# re-owned, never recursively, because the directories inside them are host paths.
 SBCLAUDE_AGENT="${SBCLAUDE_AGENT:-claude}"
-if [ "$SBCLAUDE_AGENT" = opencode ]; then
+if [ "$SBCLAUDE_AGENT" = opencode ] || [ "$SBCLAUDE_AGENT" = muse ]; then
     for _dir in .cache .local .local/share .local/state; do
         if [ -d "$HOST_HOME/$_dir" ]; then
             chown "$HOST_UID:$HOST_GID" "$HOST_HOME/$_dir" 2>/dev/null || true
@@ -414,6 +414,22 @@ if [ "$SBCLAUDE_AGENT" = opencode ]; then
     exec gosu "$HOST_UID" \
         env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
         opencode "$@"
+fi
+# muse rejects a root option placed before a subcommand. --yolo goes after exec and resume, the two
+# subcommands that run a session, and before the arguments of the interactive TUI. The remaining
+# subcommands are utilities that do not run tools.
+if [ "$SBCLAUDE_AGENT" = muse ]; then
+    if [ "${SBCLAUDE_SKIP_PERMISSIONS:-1}" = "1" ]; then
+        case "${1:-}" in
+            exec | resume) set -- "$1" --yolo "${@:2}" ;;
+            auth | config | export | init | login | logout | mcp | model-profile | plugins | \
+                sandbox | schema | serve | session-message | skills | trace | voice) ;;
+            *) set -- --yolo "$@" ;;
+        esac
+    fi
+    exec gosu "$HOST_UID" \
+        env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
+        muse "$@"
 fi
 exec gosu "$HOST_UID" \
     env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \

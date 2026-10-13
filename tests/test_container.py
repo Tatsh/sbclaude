@@ -1996,6 +1996,43 @@ def test_build_run_argv_opencode(mocker: MockerFixture, tmp_path: Path,
     assert f'{project}:{project}' in argv
 
 
+def test_muse_binary_from_path(mocker: MockerFixture, tmp_path: Path) -> None:
+    binary = tmp_path / 'muse'
+    binary.write_text('')
+    mocker.patch('sbclaude.container.which', return_value=str(binary))
+    assert container.muse_binary() == binary.resolve()
+
+
+def test_muse_binary_missing(mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.which', return_value=None)
+    with pytest.raises(FileNotFoundError, match="'muse' not found on PATH"):
+        container.muse_binary()
+
+
+def test_build_run_argv_muse(mocker: MockerFixture, tmp_path: Path,
+                             monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv('XDG_CONFIG_HOME', raising=False)
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
+    mocker.patch('sbclaude.container.which', return_value='/usr/bin/muse')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    (tmp_path / '.claude').mkdir()
+    (tmp_path / '.claude' / 'settings.json').write_text('{}')
+    project = tmp_path / 'proj'
+    project.mkdir()
+    argv, cleanup = container.build_run_argv(
+        container.RunSpec(project=project, name='n', agent='muse'))
+    assert cleanup is None
+    assert '/usr/bin/muse:/usr/local/bin/muse:ro' in argv
+    assert 'SBCLAUDE_AGENT=muse' in argv
+    assert f'{tmp_path}/data/muse:{tmp_path}/.local/share/muse' in argv
+    assert f'{tmp_path}/.config/muse:{tmp_path}/.config/muse' in argv
+    assert f'{tmp_path}/.muse:{tmp_path}/.muse' in argv
+    assert (tmp_path / 'data' / 'muse').is_dir()
+    assert (tmp_path / '.muse').is_dir()
+    assert not any('/.claude' in arg or '/usr/local/bin/claude' in arg for arg in argv)
+    assert argv[argv.index('n') + 1:].count('sbclaude:muse') == 1
+
+
 def test_build_run_argv_env_overrides_opencode_permission(mocker: MockerFixture,
                                                           tmp_path: Path) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/opencode')
@@ -2504,7 +2541,10 @@ def test_stop_leaves_a_gentoo_box_to_be_saved(mocker: MockerFixture) -> None:
 
 def test_delete_state_for_a_project(mocker: MockerFixture) -> None:
     client = mocker.MagicMock()
-    client.images.remove.side_effect = [None, docker.errors.ImageNotFound('x')]
+    client.images.remove.side_effect = [
+        None, docker.errors.ImageNotFound('x'),
+        docker.errors.ImageNotFound('x')
+    ]
     mocker.patch('sbclaude.container.docker.from_env', return_value=client)
     project = Path('/p')
     assert container.delete_state(project) == [

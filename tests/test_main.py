@@ -812,6 +812,16 @@ def test_run_agent_reaches_the_spec(args: list[str], cfg_agent: str, runner: Cli
     assert run.call_args[0][0].agent == 'opencode'
 
 
+def test_run_agent_muse_reaches_the_spec(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config(agent='muse'))
+    result = runner.invoke(main, ['run', '--session-recover'])
+    assert result.exit_code == 0
+    assert run.call_args[0][0].agent == 'muse'
+    assert run.call_args[0][0].recover is False
+    assert 'is skipped for muse' in result.output
+
+
 def test_run_agent_defaults_to_claude(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())

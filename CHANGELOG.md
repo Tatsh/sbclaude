@@ -25,6 +25,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   opencode box runs `sbclaude:opencode`, built from the same Dockerfile without the Claude Code
   managed settings and cc-session-recover. `sbclaude build` and `sbclaude delete-image` handle both
   images.
+- `--agent muse` (config key `agent`) runs Muse Code in the box instead of Claude Code. The host
+  `muse` on `PATH` is mounted read-only. `muse` runs with `--yolo` (after `exec` and `resume`, and
+  before the arguments of the interactive TUI). `~/.config/muse`, `~/.local/share/muse`, and
+  `~/.muse` are mounted read-write. A Muse Code box runs `sbclaude:muse` (`sbclaude-gentoo:muse`
+  under `--gentoo`).
 - `--docker` (config key `docker`) forwards the host Docker daemon socket into the box, and the
   image now ships the Docker CLI with the buildx and compose plugins. The socket is taken from a
   `unix://` `DOCKER_HOST` or `/var/run/docker.sock`. Control of the daemon is root on the host

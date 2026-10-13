@@ -39,7 +39,7 @@ import docker.errors
 from .typing import Agent, Distro
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from docker.models.containers import Container
 
@@ -48,9 +48,9 @@ log = logging.getLogger(__name__)
 __all__ = ('AGENTS', 'DISTRO_IMAGE_TAGS', 'GENTOO_IMAGE_TAGS', 'IMAGE_BASE', 'IMAGE_TAGS', 'LABEL',
            'RunSpec', 'build_images', 'config_dir', 'default_name', 'delete_images', 'delete_state',
            'ensure_image', 'gentoo_state_key', 'gpu_ready', 'image_exists', 'image_up_to_date',
-           'is_python_project', 'list_managed', 'opencode_binary', 'project_containers', 'run',
-           'shell', 'stop', 'transient_uv_project_environment', 'unique_name',
-           'uv_project_environment', 'uv_project_environment_in')
+           'is_python_project', 'list_managed', 'muse_binary', 'opencode_binary',
+           'project_containers', 'run', 'shell', 'stop', 'transient_uv_project_environment',
+           'unique_name', 'uv_project_environment', 'uv_project_environment_in')
 
 AGENTS = get_args(Agent)
 """
@@ -66,17 +66,22 @@ HASH_LABEL = 'sbclaude.context_hash'
 """Docker label storing the build context hash for staleness checks."""
 IMAGE_BASE = 'sbclaude:latest'
 """Tag of the sbclaude image for Claude Code."""
-IMAGE_TAGS: dict[Agent, str] = {'claude': IMAGE_BASE, 'opencode': 'sbclaude:opencode'}
+IMAGE_TAGS: dict[Agent, str] = {
+    'claude': IMAGE_BASE,
+    'muse': 'sbclaude:muse',
+    'opencode': 'sbclaude:opencode'
+}
 """
 Image tag for each agent, and the Dockerfile target it is built from.
 
-The opencode image is the shared base alone. The Claude Code image adds its managed settings and
-cc-session-recover on top, and shares every other layer.
+The muse and opencode images are the shared base alone. The Claude Code image adds its managed
+settings and cc-session-recover on top, and shares every other layer.
 
 :meta hide-value:
 """
 GENTOO_IMAGE_TAGS: dict[Agent, str] = {
     'claude': 'sbclaude-gentoo:latest',
+    'muse': 'sbclaude-gentoo:muse',
     'opencode': 'sbclaude-gentoo:opencode'
 }
 """
@@ -212,6 +217,14 @@ XDG base directories opencode stores under, each with its default location relat
 
 The data directory has the provider credentials (``auth.json``) and the session database. A box
 without them starts signed out with no history.
+
+:meta hide-value:
+"""
+MUSE_XDG_DIRS = (('XDG_CONFIG_HOME', '.config'), ('XDG_DATA_HOME', '.local/share'))
+"""
+XDG base directories muse stores under, each with its default location relative to home.
+
+The configuration directory has ``settings.json``, and the data directory has the session logs.
 
 :meta hide-value:
 """
@@ -585,6 +598,26 @@ def claude_binary(override: str | None = None) -> Path:
     return Path(found).resolve()
 
 
+def muse_binary() -> Path:
+    """
+    Locate the host ``muse`` binary.
+
+    Returns
+    -------
+    Path
+        The resolved binary path.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``muse`` is not on ``PATH``.
+    """
+    if not (found := which('muse')):
+        msg = "'muse' not found on PATH"
+        raise FileNotFoundError(msg)
+    return Path(found).resolve()
+
+
 def opencode_binary() -> Path:
     """
     Locate the host ``opencode`` binary, downloading the latest release when there is none.
@@ -768,8 +801,8 @@ def build_run_argv(spec: RunSpec, *, state: str | None = None) -> tuple[list[str
         f'HOST_HOME={home}', '-e', f'TERM={os.environ.get("TERM", "xterm-256color")}'
     ]
     cleanup: Path | None = None
-    if spec.agent == 'opencode':
-        argv += _opencode_args(home)
+    if agent_args := {'muse': _muse_args, 'opencode': _opencode_args}.get(spec.agent):
+        argv += agent_args(home)
     else:
         argv += [
             *_v(claude_binary(spec.claude_binary), '/usr/local/bin/claude', ro=True), *_v(cfg_dir)
@@ -849,14 +882,29 @@ def _opencode_args(home: Path) -> list[str]:
     # land in a directory the user cannot write to. The host may relocate a directory with its XDG
     # variable. The box receives no XDG variable, and the directory is mounted at the default path
     # the box's opencode looks in.
-    args = [
+    return [
         *_v(opencode_binary(), '/usr/local/bin/opencode', ro=True), '-e', 'SBCLAUDE_AGENT=opencode',
-        '-e', 'OPENCODE_DISABLE_AUTOUPDATE=1', '-e', f'OPENCODE_PERMISSION={OPENCODE_PERMISSION}'
+        '-e', 'OPENCODE_DISABLE_AUTOUPDATE=1', '-e', f'OPENCODE_PERMISSION={OPENCODE_PERMISSION}',
+        *_xdg_args(home, 'opencode', OPENCODE_XDG_DIRS)
     ]
-    for variable, default in OPENCODE_XDG_DIRS:
-        host = Path(os.environ.get(variable) or home / default) / 'opencode'
+
+
+def _muse_args(home: Path) -> list[str]:
+    # ~/.muse has the projects home and the session worktrees. It is created on the host before it
+    # is mounted, because Docker would otherwise create a missing source as root.
+    (dot_muse := home / '.muse').mkdir(exist_ok=True)
+    return [
+        *_v(muse_binary(), '/usr/local/bin/muse', ro=True), '-e', 'SBCLAUDE_AGENT=muse',
+        *_xdg_args(home, 'muse', MUSE_XDG_DIRS), *_v(dot_muse)
+    ]
+
+
+def _xdg_args(home: Path, app: str, dirs: Iterable[tuple[str, str]]) -> list[str]:
+    args: list[str] = []
+    for variable, default in dirs:
+        host = Path(os.environ.get(variable) or home / default) / app
         host.mkdir(parents=True, exist_ok=True)
-        args += _v(host, home / default / 'opencode')
+        args += _v(host, home / default / app)
     return args
 
 

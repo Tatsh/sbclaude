@@ -6,7 +6,7 @@ from typing import Literal, TypeAlias
 
 __all__ = ('Agent', 'Distro')
 
-Agent: TypeAlias = Literal['claude', 'opencode']
+Agent: TypeAlias = Literal['claude', 'muse', 'opencode']
 """Coding agent the box runs."""
 Distro: TypeAlias = Literal['debian', 'gentoo']
 """Distribution the box's image is built on."""

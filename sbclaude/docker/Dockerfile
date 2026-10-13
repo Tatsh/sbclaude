@@ -255,7 +255,8 @@ RUN find / -xdev -type f -perm /6000 -exec chmod a-s {} + 2>/dev/null || true
 # tini as PID 1 -> entrypoint sets up identity and drops privileges via gosu.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 
-# opencode needs nothing beyond the shared base.
+# The muse and opencode images need nothing beyond the shared base.
+FROM base AS muse
 FROM base AS opencode
 
 # Claude Code only. Last, so that it is the default target. Nothing here is setuid, so the strip

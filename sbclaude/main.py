@@ -93,8 +93,9 @@ def main(ctx: click.Context) -> None:
 @click.option('-a',
               '--agent',
               type=click.Choice(container.AGENTS),
-              help='Coding agent to run in the box (claude by default). opencode is taken from '
-              'PATH, or the latest release is downloaded when PATH has no opencode.')
+              help='Coding agent to run in the box (claude by default). The muse binary is taken '
+              'from PATH. opencode is taken from PATH, or the latest release is downloaded when '
+              'opencode is not on PATH.')
 @click.option('--claude-binary',
               help='Host claude executable to mount instead of the first one on PATH. Use this to '
               'pin a version, or to supply an ELF build.')
@@ -338,7 +339,7 @@ def _agent(value: str) -> Agent:
         If the agent is not one sbclaude can run.
     """
     match value:
-        case 'claude' | 'opencode':
+        case 'claude' | 'muse' | 'opencode':
             return value
         case _:
             msg = f'unknown agent {value!r}; expected one of {", ".join(container.AGENTS)}'

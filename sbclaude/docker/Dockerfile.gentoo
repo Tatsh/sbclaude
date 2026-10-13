@@ -48,6 +48,7 @@ RUN chmod 755 /usr/local/bin/entrypoint.sh
 RUN find / -xdev -type f -perm /6000 -exec chmod a-s {} + 2>/dev/null || true
 ENTRYPOINT ["/usr/local/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 
+FROM base AS muse
 FROM base AS opencode
 
 # The claude stage is for Claude Code only and comes last to be the default target, as in the
