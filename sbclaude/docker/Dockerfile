@@ -33,10 +33,16 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         > /etc/apt/sources.list.d/docker.list \
     && apt-get update && apt-get install -y --no-install-recommends \
           ninja-build \
+        autoconf \
+        automake \
+        bison \
         build-essential \
         docker-buildx-plugin \
         docker-ce-cli \
         docker-compose-plugin \
+        extra-cmake-modules \
+        flex \
+        gettext \
         gh \
         gir1.2-glib-2.0 \
         git \
@@ -50,7 +56,15 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         libcairo2-dev \
         libffi-dev \
         libgirepository-2.0-dev \
+        libgmp-dev \
+        libgsl-dev \
+        libisl-dev \
+        libmpc-dev \
+        libmpfr-dev \
+        libtool \
+        libwayland-dev \
         locales \
+        m4 \
         nodejs \
         openssh-client \
         pkg-config \
@@ -62,6 +76,7 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         qt6-base-dev-tools \
         ripgrep \
         sudo \
+        texinfo \
         tini \
     && corepack enable yarn \
     && sed -i 's/^# *\(en_GB.UTF-8\)/\1/' /etc/locale.gen && locale-gen \

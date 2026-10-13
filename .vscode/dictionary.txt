@@ -143,7 +143,12 @@ libgirepository
 libgl
 libglu
 libglvnd
+libgmp
+libgsl
+libisl
 libjsonnet
+libmpc
+libmpfr
 libmpg
 libnss
 libnvidia
@@ -154,6 +159,7 @@ libsox
 libspeex
 libvorbis
 libvorbisfile
+libwayland
 libx
 libxcb
 libxcomposite
@@ -284,6 +290,7 @@ sysconf
 tatsh
 temurin
 testpaths
+texinfo
 thps
 tianon
 tini
