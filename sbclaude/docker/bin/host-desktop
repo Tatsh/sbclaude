@@ -189,9 +189,12 @@ class Portal:
             msg = f'portal interfaces missing: {e}.'
             raise PortalError(msg) from e
 
-    async def portal_call(self, iface: object, method: str, args: list, timeout: float) -> dict:
+    async def portal_call(self, iface: object, method: str, args: list) -> dict:
         """
         Call a portal method that responds through a Request, and wait for it.
+
+        The reply to ``start`` waits on the host approval dialog and may take up to
+        ``START_TIMEOUT`` seconds. Every other reply may take up to ``CALL_TIMEOUT`` seconds.
 
         Parameters
         ----------
@@ -201,8 +204,6 @@ class Portal:
             The portal method name, without the ``call_`` prefix.
         args : list
             The method arguments, ending with the options dictionary.
-        timeout : float
-            How long the host approval may take, in seconds.
 
         Returns
         -------
@@ -230,8 +231,10 @@ class Portal:
 
         request.on_response(on_response)
         sys.stderr.write(f'host-desktop: waiting on the host approval for {method}...\n')
+        timeout = START_TIMEOUT if method == 'start' else CALL_TIMEOUT
         try:
-            response, results = await asyncio.wait_for(future, timeout)
+            async with asyncio.timeout(timeout):
+                response, results = await future
         except TimeoutError as e:
             msg = f'{method} drew no reply within {timeout:.0f}s.'
             raise PortalError(msg) from e
@@ -297,7 +300,7 @@ async def screencast_streams(portal: Portal) -> tuple[str, list[tuple[int, dict]
     """
     results = await portal.portal_call(portal.screencast, 'create_session', [{
         'session_handle_token': Variant('s', _token('sess'))
-    }], CALL_TIMEOUT)
+    }])
     session = str(results['session_handle'])
     try:
         modes = await portal.bus.call(
@@ -317,9 +320,8 @@ async def screencast_streams(portal: Portal) -> tuple[str, list[tuple[int, dict]
                 'multiple': Variant('b', value=False),
                 'cursor_mode': Variant('u', cursor)
             }
-        ], CALL_TIMEOUT)
-        started = await portal.portal_call(portal.screencast, 'start', [session, '', {}],
-                                           START_TIMEOUT)
+        ])
+        started = await portal.portal_call(portal.screencast, 'start', [session, '', {}])
     except PortalError:
         await portal.close_session(session)
         raise
@@ -352,7 +354,7 @@ async def _select_remote_devices(portal: Portal, session: str, devices: int, *,
     await portal.portal_call(portal.remote, 'select_devices',
                              [session, {
                                  'types': Variant('u', devices)
-                             }], CALL_TIMEOUT)
+                             }])
     if with_screen:
         try:
             await portal.portal_call(portal.screencast, 'select_sources', [
@@ -361,7 +363,7 @@ async def _select_remote_devices(portal: Portal, session: str, devices: int, *,
                     'multiple': Variant('b', value=False),
                     'cursor_mode': Variant('u', CURSOR_EMBEDDED)
                 }
-            ], CALL_TIMEOUT)
+            ])
         except PortalError as e:
             sys.stderr.write(f'host-desktop: combined screen sharing failed: {e}\n')
 
@@ -394,11 +396,11 @@ async def remote_session(portal: Portal,
     """
     results = await portal.portal_call(portal.remote, 'create_session', [{
         'session_handle_token': Variant('s', _token('sess'))
-    }], CALL_TIMEOUT)
+    }])
     session = str(results['session_handle'])
     try:
         await _select_remote_devices(portal, session, devices, with_screen=with_screen)
-        started = await portal.portal_call(portal.remote, 'start', [session, '', {}], START_TIMEOUT)
+        started = await portal.portal_call(portal.remote, 'start', [session, '', {}])
     except PortalError:
         await portal.close_session(session)
         raise
