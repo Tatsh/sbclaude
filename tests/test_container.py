@@ -1996,6 +1996,57 @@ def test_build_run_argv_opencode(mocker: MockerFixture, tmp_path: Path,
     assert f'{project}:{project}' in argv
 
 
+def test_codex_binary_from_path(mocker: MockerFixture, tmp_path: Path) -> None:
+    binary = tmp_path / 'codex'
+    binary.write_text('')
+    mocker.patch('sbclaude.container.which', return_value=str(binary))
+    assert container.codex_binary() == binary.resolve()
+
+
+def test_codex_binary_missing(mocker: MockerFixture) -> None:
+    mocker.patch('sbclaude.container.which', return_value=None)
+    with pytest.raises(FileNotFoundError, match="'codex' not found on PATH"):
+        container.codex_binary()
+
+
+@pytest.mark.parametrize('codex_home', [None, 'elsewhere'])
+def test_build_run_argv_codex(codex_home: str | None, mocker: MockerFixture, tmp_path: Path,
+                              monkeypatch: pytest.MonkeyPatch) -> None:
+    host_home = tmp_path / (codex_home or '.codex')
+    if codex_home:
+        monkeypatch.setenv('CODEX_HOME', str(host_home))
+    else:
+        monkeypatch.delenv('CODEX_HOME', raising=False)
+    mocker.patch('sbclaude.container.which', side_effect=lambda name: f'/usr/bin/{name}')
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    (tmp_path / '.claude').mkdir()
+    (tmp_path / '.claude' / 'settings.json').write_text('{}')
+    project = tmp_path / 'proj'
+    project.mkdir()
+    argv, cleanup = container.build_run_argv(
+        container.RunSpec(project=project, name='n', agent='codex'))
+    assert cleanup is None
+    assert '/usr/bin/codex:/usr/local/bin/codex:ro' in argv
+    assert '/usr/bin/codex-code-mode-host:/usr/local/bin/codex-code-mode-host:ro' in argv
+    assert 'SBCLAUDE_AGENT=codex' in argv
+    assert f'{host_home}:{tmp_path}/.codex' in argv
+    assert host_home.is_dir()
+    assert not any('/.claude' in arg or '/usr/local/bin/claude' in arg for arg in argv)
+    assert argv[argv.index('n') + 1:].count('sbclaude:codex') == 1
+
+
+def test_build_run_argv_codex_without_code_mode_host(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch('sbclaude.container.which', side_effect={'codex': '/usr/bin/codex'}.get)
+    mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
+    (tmp_path / '.claude').mkdir()
+    (tmp_path / '.claude' / 'settings.json').write_text('{}')
+    project = tmp_path / 'proj'
+    project.mkdir()
+    argv, _ = container.build_run_argv(container.RunSpec(project=project, name='n', agent='codex'))
+    assert '/usr/bin/codex:/usr/local/bin/codex:ro' in argv
+    assert not any('codex-code-mode-host' in arg for arg in argv)
+
+
 def test_muse_binary_from_path(mocker: MockerFixture, tmp_path: Path) -> None:
     binary = tmp_path / 'muse'
     binary.write_text('')
@@ -2542,7 +2593,9 @@ def test_stop_leaves_a_gentoo_box_to_be_saved(mocker: MockerFixture) -> None:
 def test_delete_state_for_a_project(mocker: MockerFixture) -> None:
     client = mocker.MagicMock()
     client.images.remove.side_effect = [
-        None, docker.errors.ImageNotFound('x'),
+        None,
+        docker.errors.ImageNotFound('x'),
+        docker.errors.ImageNotFound('x'),
         docker.errors.ImageNotFound('x')
     ]
     mocker.patch('sbclaude.container.docker.from_env', return_value=client)

@@ -30,11 +30,12 @@
 
 <!-- WISWA-GENERATED-README:STOP -->
 
-`sbclaude` runs **Claude Code** (or [opencode](#opencode), or [Muse Code](#muse-code)) inside a
-throwaway Docker container with the bash sandbox and permission prompts **disabled**, against a
-configurable set of host bind mounts. The container stores nothing (`--rm`); everything is stored
-on the host. A [Gentoo box](#gentoo-box---gentoo) is the exception, and is saved between sessions.
-You only ever invoke `sbclaude`. It manages its image and containers via the Docker SDK.
+`sbclaude` runs **Claude Code** (or [opencode](#opencode), [Muse Code](#muse-code), or
+[Codex](#codex)) inside a throwaway Docker container with the bash sandbox and permission prompts
+**disabled**, against a configurable set of host bind mounts. The container stores nothing (`--rm`);
+everything is stored on the host. A [Gentoo box](#gentoo-box---gentoo) is the exception, and is
+saved between sessions. You only ever invoke `sbclaude`. It manages its image and containers via the
+Docker SDK.
 
 **The host must be Linux.** The host copy of `claude` is bind-mounted into a Linux container and
 executed there, so the host must supply an ELF build of it (a Mac's own `claude` is Mach-O and
@@ -46,17 +47,16 @@ refusal can be lifted for a host you are prepared to set up by hand — see
 [Running from a non-Linux host](#running-from-a-non-linux-host) — but nothing beyond Linux is
 tested or supported.
 
-Three images are built on demand from one Dockerfile. `sbclaude:latest` runs Claude Code,
-`sbclaude:opencode` runs opencode, and `sbclaude:muse` runs Muse Code. They share every layer
-except the last, where the Claude Code image adds its managed settings and cc-session-recover.
-All bundle everyday coding tools
-(Debian slim + git, ripgrep, Node 24/Yarn, a C toolchain, gh, glab, uv, jq), formatters and
-linters kept at their latest upstream release (clang-format, jsonnet, jsonnetfmt, shellcheck), Qt 6
-development (`qt6-base-dev` plus ninja), a Rust toolchain (rustup stable with the
-`wasm32-unknown-unknown` target and `cargo bin`, for repositories that build WebAssembly),
-`webshot` (a GPU Chrome driver for screenshots and visual diffs, with Chromium baked in), and a
-mobile reverse-engineering toolchain (a JDK, frida, mitmproxy, dex2jar, baksmali/smali, and
-launchers for the host-mounted Ghidra, Android SDK, jadx, and apktool).
+Four images are built on demand from one Dockerfile. `sbclaude:latest` runs Claude Code,
+`sbclaude:opencode` runs opencode, `sbclaude:muse` runs Muse Code, and `sbclaude:codex` runs Codex.
+They share every layer except the last, where the Claude Code image adds its managed settings and
+cc-session-recover. All bundle everyday coding tools (Debian slim + git, ripgrep, Node 24/Yarn, a C
+toolchain, gh, glab, uv, jq), formatters and linters kept at their latest upstream release
+(clang-format, jsonnet, jsonnetfmt, shellcheck), Qt 6 development (`qt6-base-dev` plus ninja), a
+Rust toolchain (rustup stable with the `wasm32-unknown-unknown` target and `cargo bin`, for
+repositories that build WebAssembly), `webshot` (a GPU Chrome driver for screenshots and visual
+diffs, with Chromium built in), and a mobile reverse-engineering toolchain (a JDK, frida, mitmproxy,
+dex2jar, baksmali/smali, and launchers for the host-mounted Ghidra, Android SDK, jadx, and apktool).
 
 Cargo keeps its registry in `$HOME/.cargo`, which is part of the box and goes away with it, so a
 Rust build starts from an empty cache each time. Add `rw = ["~/.cargo"]` to keep the downloaded
@@ -126,6 +126,7 @@ sbclaude run --re --x11           # Ghidra/Android mounts + GUI passthrough
 sbclaude run -- --version         # everything after -- goes to claude
 sbclaude run --agent opencode     # run opencode instead of claude
 sbclaude run --agent muse         # run Muse Code instead of claude
+sbclaude run --agent codex        # run Codex instead of claude
 sbclaude ls                       # list running sbclaude containers
 sbclaude stop [--all]             # stop this project's boxes (or all with --all)
 sbclaude shell                    # debug shell in this project's box, as your user
@@ -208,6 +209,7 @@ more than one is running).
 | `--venv-dir DIR`    | put the box's virtualenv in `DIR` (e.g. a volume) instead of beside the project  |
 | `--agent opencode`  | run opencode instead of claude (host `PATH`, or the latest release downloaded)   |
 | `--agent muse`      | run Muse Code instead of claude (host `PATH`)                                    |
+| `--agent codex`     | run Codex instead of claude (host `PATH`)                                        |
 | `--claude-binary`   | mount this `claude` build instead of the first one on `PATH`                     |
 | `--no-modify`       | stop sbclaude writing anything into the project directory                        |
 | `--no-fullscreen`   | do not force the fullscreen TUI, so a failing session's output survives          |
@@ -258,6 +260,7 @@ x11 = true  # forward X11 for GUI apps
 # claude_binary = "~/bin/claude"  # mount this claude build rather than the first one on PATH
 # agent = "opencode"              # run opencode instead of claude (same as --agent opencode)
 # agent = "muse"                  # run Muse Code instead of claude (same as --agent muse)
+# agent = "codex"                 # run Codex instead of claude (same as --agent codex)
 # default_profile = "work"        # apply this profile when --profile is absent
 # gentoo = true                   # run the Gentoo image for ebuild work (same as --gentoo)
 # fullscreen = false              # do not force the fullscreen TUI (keeps start-up errors visible)
@@ -459,6 +462,28 @@ For Muse Code, `~/.claude` is not mounted, `settings.json` is not patched, `--no
 no effect, and `--session-recover` is ignored with a note. The box runs `sbclaude:muse`, an image
 without Claude Code's managed settings or cc-session-recover.
 
+## Codex
+
+`--agent codex` (config key `agent`) runs Codex in the box instead of Claude Code. The host `codex`
+on `PATH` is mounted read-only, as `claude` is. sbclaude does not download Codex, and a host without
+`codex` on `PATH` cannot start a Codex box. The binary must be a native build. The npm package
+installs a Node launcher that needs its package directory, and sbclaude does not mount the package
+directory. The host `codex-code-mode-host` helper on `PATH`, when present, is mounted read-only
+beside `codex`.
+
+The box passes `--dangerously-bypass-approvals-and-sandbox` before every subcommand. The flag
+disables approval prompts and the Codex sandbox, and `exec`, `review`, `resume`, and `fork` all
+apply it. `-e SBCLAUDE_SKIP_PERMISSIONS=0` omits the flag. The update check is turned off with
+`-c check_for_update_on_startup=false`, because the mounted binary is read-only.
+
+Codex stores its configuration, credentials, and sessions in `~/.codex`. The directory is created
+on the host when missing and mounted read-write. A directory the host relocates with `CODEX_HOME`
+is mounted at `~/.codex` inside the box.
+
+For Codex, `~/.claude` is not mounted, `settings.json` is not patched, `--no-fullscreen` has no
+effect, and `--session-recover` is ignored with a note. The box runs `sbclaude:codex`, an image
+without Claude Code's managed settings or cc-session-recover.
+
 ## Gentoo box (`--gentoo`)
 
 `--gentoo` (config key `gentoo`) runs an image built from a Gentoo stage3, for editing ebuilds and
@@ -466,7 +491,7 @@ testing their builds. It ships pkgcheck, pkgdev, gentoolkit, portage-utils, git,
 Debian image's RE toolchain, `webshot`, Qt, and Rust are absent, although their run flags still
 mount what they mount. `sbclaude build --gentoo` builds the image ahead of time, and the first
 `run --gentoo` builds it otherwise. The images are `sbclaude-gentoo:latest`,
-`sbclaude-gentoo:opencode`, and `sbclaude-gentoo:muse`.
+`sbclaude-gentoo:opencode`, `sbclaude-gentoo:muse`, and `sbclaude-gentoo:codex`.
 
 emerge and ebuild run as root, and `--gentoo` therefore implies `--sudo`.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Recreate the host user's identity inside the container, then drop privileges
-# and launch Claude Code (or opencode, or muse) with no permission prompts.
+# and launch Claude Code (or opencode, muse, or codex) with no permission prompts.
 #
 # Why mirror the host identity (UID/GID/USER/HOME) instead of using a baked-in
 # user? Two reasons:
@@ -218,7 +218,7 @@ fi
 # creates their parents root-owned for the same reason as ~/.config above. Only the parents are
 # re-owned, never recursively, because the directories inside them are host paths.
 SBCLAUDE_AGENT="${SBCLAUDE_AGENT:-claude}"
-if [ "$SBCLAUDE_AGENT" = opencode ] || [ "$SBCLAUDE_AGENT" = muse ]; then
+if [ "$SBCLAUDE_AGENT" != claude ]; then
     for _dir in .cache .local .local/share .local/state; do
         if [ -d "$HOST_HOME/$_dir" ]; then
             chown "$HOST_UID:$HOST_GID" "$HOST_HOME/$_dir" 2>/dev/null || true
@@ -430,6 +430,17 @@ if [ "$SBCLAUDE_AGENT" = muse ]; then
     exec gosu "$HOST_UID" \
         env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
         muse "$@"
+fi
+# codex accepts its root options before every subcommand, and exec, review, resume, and fork apply
+# them. The update check is turned off because the mounted binary is read-only.
+if [ "$SBCLAUDE_AGENT" = codex ]; then
+    CODEX_FLAGS=(-c check_for_update_on_startup=false)
+    if [ "${SBCLAUDE_SKIP_PERMISSIONS:-1}" = "1" ]; then
+        CODEX_FLAGS+=(--dangerously-bypass-approvals-and-sandbox)
+    fi
+    exec gosu "$HOST_UID" \
+        env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \
+        codex "${CODEX_FLAGS[@]}" "$@"
 fi
 exec gosu "$HOST_UID" \
     env HOME="$HOST_HOME" USER="$USER_NAME" LOGNAME="$USER_NAME" PATH="$PATH" \

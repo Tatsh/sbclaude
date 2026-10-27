@@ -46,11 +46,12 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 __all__ = ('AGENTS', 'DISTRO_IMAGE_TAGS', 'GENTOO_IMAGE_TAGS', 'IMAGE_BASE', 'IMAGE_TAGS', 'LABEL',
-           'RunSpec', 'build_images', 'config_dir', 'default_name', 'delete_images', 'delete_state',
-           'ensure_image', 'gentoo_state_key', 'gpu_ready', 'image_exists', 'image_up_to_date',
-           'is_python_project', 'list_managed', 'muse_binary', 'opencode_binary',
-           'project_containers', 'run', 'shell', 'stop', 'transient_uv_project_environment',
-           'unique_name', 'uv_project_environment', 'uv_project_environment_in')
+           'RunSpec', 'build_images', 'codex_binary', 'config_dir', 'default_name', 'delete_images',
+           'delete_state', 'ensure_image', 'gentoo_state_key', 'gpu_ready', 'image_exists',
+           'image_up_to_date', 'is_python_project', 'list_managed', 'muse_binary',
+           'opencode_binary', 'project_containers', 'run', 'shell', 'stop',
+           'transient_uv_project_environment', 'unique_name', 'uv_project_environment',
+           'uv_project_environment_in')
 
 AGENTS = get_args(Agent)
 """
@@ -68,19 +69,21 @@ IMAGE_BASE = 'sbclaude:latest'
 """Tag of the sbclaude image for Claude Code."""
 IMAGE_TAGS: dict[Agent, str] = {
     'claude': IMAGE_BASE,
+    'codex': 'sbclaude:codex',
     'muse': 'sbclaude:muse',
     'opencode': 'sbclaude:opencode'
 }
 """
 Image tag for each agent, and the Dockerfile target it is built from.
 
-The muse and opencode images are the shared base alone. The Claude Code image adds its managed
-settings and cc-session-recover on top, and shares every other layer.
+The codex, muse, and opencode images are the shared base alone. The Claude Code image adds its
+managed settings and cc-session-recover on top, and shares every other layer.
 
 :meta hide-value:
 """
 GENTOO_IMAGE_TAGS: dict[Agent, str] = {
     'claude': 'sbclaude-gentoo:latest',
+    'codex': 'sbclaude-gentoo:codex',
     'muse': 'sbclaude-gentoo:muse',
     'opencode': 'sbclaude-gentoo:opencode'
 }
@@ -598,6 +601,26 @@ def claude_binary(override: str | None = None) -> Path:
     return Path(found).resolve()
 
 
+def codex_binary() -> Path:
+    """
+    Locate the host ``codex`` binary.
+
+    Returns
+    -------
+    Path
+        The resolved binary path.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``codex`` is not on ``PATH``.
+    """
+    if not (found := which('codex')):
+        msg = "'codex' not found on PATH"
+        raise FileNotFoundError(msg)
+    return Path(found).resolve()
+
+
 def muse_binary() -> Path:
     """
     Locate the host ``muse`` binary.
@@ -801,7 +824,11 @@ def build_run_argv(spec: RunSpec, *, state: str | None = None) -> tuple[list[str
         f'HOST_HOME={home}', '-e', f'TERM={os.environ.get("TERM", "xterm-256color")}'
     ]
     cleanup: Path | None = None
-    if agent_args := {'muse': _muse_args, 'opencode': _opencode_args}.get(spec.agent):
+    if agent_args := {
+            'codex': _codex_args,
+            'muse': _muse_args,
+            'opencode': _opencode_args
+    }.get(spec.agent):
         argv += agent_args(home)
     else:
         argv += [
@@ -897,6 +924,22 @@ def _muse_args(home: Path) -> list[str]:
         *_v(muse_binary(), '/usr/local/bin/muse', ro=True), '-e', 'SBCLAUDE_AGENT=muse',
         *_xdg_args(home, 'muse', MUSE_XDG_DIRS), *_v(dot_muse)
     ]
+
+
+def _codex_args(home: Path) -> list[str]:
+    # codex stores its configuration, credentials, and sessions under CODEX_HOME (~/.codex by
+    # default). The host directory is created before it is mounted, because Docker would otherwise
+    # create a missing source as root. The box receives no CODEX_HOME, and the directory is mounted
+    # at the default path. codex executes codex-code-mode-host as a separate helper binary.
+    codex_home = Path(os.environ.get('CODEX_HOME') or home / '.codex')
+    codex_home.mkdir(parents=True, exist_ok=True)
+    args = [
+        *_v(codex_binary(), '/usr/local/bin/codex', ro=True), '-e', 'SBCLAUDE_AGENT=codex',
+        *_v(codex_home, home / '.codex')
+    ]
+    if host := which('codex-code-mode-host'):
+        args += _v(Path(host).resolve(), '/usr/local/bin/codex-code-mode-host', ro=True)
+    return args
 
 
 def _xdg_args(home: Path, app: str, dirs: Iterable[tuple[str, str]]) -> list[str]:

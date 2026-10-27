@@ -27,7 +27,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "SBCLAUDE" "1" "Sep 26, 2026" "0.3.0" "sbclaude"
+.TH "SBCLAUDE" "1" "Oct 27, 2026" "0.3.0" "sbclaude"
 .SH NAME
 sbclaude \- sbclaude v0.3.0
 .sp
@@ -86,6 +86,11 @@ Debian archive mirror to bake into the image, e.g. \X'tty: link http://ftp.us.de
 .TP
 .B \-\-gentoo
 Build the Gentoo images instead of the Debian ones.
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \-\-profile <profile>
+Config profile from the profiles directory, overlaid on the global config. Default: the default_profile key.
 .UNINDENT
 .SS config
 .sp
@@ -173,6 +178,11 @@ Project dir (read\-write, becomes the workdir). Default: cwd.
 .UNINDENT
 .INDENT 0.0
 .TP
+.B \-\-profile <profile>
+Config profile from the profiles directory, overlaid on the global config. Default: the default_profile key.
+.UNINDENT
+.INDENT 0.0
+.TP
 .B \-w, \-\-rw <rw_extra>
 Extra read\-write mount.
 .UNINDENT
@@ -194,11 +204,11 @@ Image override.
 .INDENT 0.0
 .TP
 .B \-a, \-\-agent <agent>
-Coding agent to run in the box (claude by default). The muse binary is taken from PATH. opencode is taken from PATH, or the latest release is downloaded when opencode is not on PATH.
+Coding agent to run in the box (claude by default). The codex and muse binaries are taken from PATH. opencode is taken from PATH, or the latest release is downloaded when opencode is not on PATH.
 .INDENT 7.0
 .TP
 .B Options
-claude | muse | opencode
+claude | codex | muse | opencode
 .UNINDENT
 .UNINDENT
 .INDENT 0.0
@@ -279,7 +289,7 @@ Forward the Wayland socket for GUIs (preferred over \-\-x11).
 .INDENT 0.0
 .TP
 .B \-\-desktop
-Forward the host desktop session for portal screen capture and input, so the agent can see and control it after host approval.
+Forward the host desktop session for portal screen capture and input. The agent can see and control the session after host approval.
 .UNINDENT
 .INDENT 0.0
 .TP

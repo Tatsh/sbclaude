@@ -98,7 +98,7 @@ class Config:
     """Resolved sbclaude configuration."""
 
     agent: str = 'claude'
-    """Coding agent the box runs, ``claude``, ``muse``, or ``opencode``."""
+    """Coding agent the box runs (``claude``, ``codex``, ``muse``, or ``opencode``)."""
     android: bool = False
     """Whether to mount the Android SDK and related devices."""
     claude_binary: str | None = None

@@ -822,6 +822,16 @@ def test_run_agent_muse_reaches_the_spec(runner: CliRunner, mocker: MockerFixtur
     assert 'is skipped for muse' in result.output
 
 
+def test_run_agent_codex_reaches_the_spec(runner: CliRunner, mocker: MockerFixture) -> None:
+    run = mocker.patch('sbclaude.main.container.run', return_value=0)
+    mocker.patch('sbclaude.main.load_config', return_value=Config())
+    result = runner.invoke(main, ['run', '--agent', 'codex', '--session-recover'])
+    assert result.exit_code == 0
+    assert run.call_args[0][0].agent == 'codex'
+    assert run.call_args[0][0].recover is False
+    assert 'is skipped for codex' in result.output
+
+
 def test_run_agent_defaults_to_claude(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
     mocker.patch('sbclaude.main.load_config', return_value=Config())
@@ -831,10 +841,10 @@ def test_run_agent_defaults_to_claude(runner: CliRunner, mocker: MockerFixture) 
 
 def test_run_rejects_an_unknown_agent_from_config(runner: CliRunner, mocker: MockerFixture) -> None:
     run = mocker.patch('sbclaude.main.container.run', return_value=0)
-    mocker.patch('sbclaude.main.load_config', return_value=Config(agent='codex'))
+    mocker.patch('sbclaude.main.load_config', return_value=Config(agent='aider'))
     result = runner.invoke(main, ['run'])
     assert result.exit_code == 1
-    assert "unknown agent 'codex'" in result.output
+    assert "unknown agent 'aider'" in result.output
     assert not run.called
 
 

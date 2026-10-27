@@ -30,6 +30,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   before the arguments of the interactive TUI). `~/.config/muse`, `~/.local/share/muse`, and
   `~/.muse` are mounted read-write. A Muse Code box runs `sbclaude:muse` (`sbclaude-gentoo:muse`
   under `--gentoo`).
+- `--agent codex` (config key `agent`) runs Codex in the box instead of Claude Code. The host
+  `codex` and, when present, `codex-code-mode-host` on `PATH` are mounted read-only. `codex` runs
+  with `--dangerously-bypass-approvals-and-sandbox` and with its update check off. `~/.codex` (or
+  the host `CODEX_HOME`) is mounted read-write. A Codex box runs `sbclaude:codex`
+  (`sbclaude-gentoo:codex` under `--gentoo`).
 - `--docker` (config key `docker`) forwards the host Docker daemon socket into the box, and the
   image now ships the Docker CLI with the buildx and compose plugins. The socket is taken from a
   `unix://` `DOCKER_HOST` or `/var/run/docker.sock`. Control of the daemon is root on the host
