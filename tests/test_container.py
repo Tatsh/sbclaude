@@ -13,6 +13,7 @@ import socket
 import subprocess as sp
 import tarfile
 import tempfile
+import time
 
 import docker.errors
 import pytest
@@ -347,7 +348,7 @@ def test_run_reports_a_container_that_never_started(code: int, capsys: pytest.Ca
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
-    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.time', monotonic=time.monotonic)
     popen = docker_run(code, b'docker: Error response from daemon: unresolvable CDI devices\n')
     to_syslog = mocker.patch('sbclaude.container.syslog.syslog')
     project = tmp_path / 'p'
@@ -433,7 +434,7 @@ def test_run_stops_retrying_once_a_box_starts(capsys: pytest.CaptureFixture[str]
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
-    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.time', monotonic=time.monotonic)
     mocker.patch('sbclaude.container.syslog.syslog')
     popen = docker_run([125, 0])
     project = tmp_path / 'p'
@@ -451,7 +452,7 @@ def test_run_points_at_no_fullscreen_when_a_session_dies_at_once(capsys: pytest.
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
-    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.time', monotonic=time.monotonic)
     docker_run(1)
     to_syslog = mocker.patch('sbclaude.container.syslog.syslog')
     project = tmp_path / 'p'
@@ -467,7 +468,7 @@ def test_run_does_not_blame_the_tui_without_it(capsys: pytest.CaptureFixture[str
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
-    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.time', monotonic=time.monotonic)
     docker_run(1)
     mocker.patch('sbclaude.container.syslog.syslog')
     project = tmp_path / 'p'
@@ -485,7 +486,7 @@ def test_run_survives_a_syslog_that_cannot_be_written(capsys: pytest.CaptureFixt
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/claude')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
-    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.time', monotonic=time.monotonic)
     docker_run(125)
     mocker.patch('sbclaude.container.syslog.openlog', side_effect=OSError('no /dev/log'))
     project = tmp_path / 'p'
@@ -506,7 +507,7 @@ def test_run_stays_quiet_when_there_is_nothing_to_explain(code: int, seconds: fl
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
     docker_run(code)
-    mocker.patch('sbclaude.container.time.monotonic', side_effect=[0.0, seconds])
+    mocker.patch('sbclaude.container.time').monotonic.side_effect = [0.0, seconds]
     project = tmp_path / 'p'
     project.mkdir()
     container.run(container.RunSpec(project=project, name='n'))
@@ -844,7 +845,7 @@ def test_gpu_ready_when_a_device_is_listed(mocker: MockerFixture) -> None:
 
 def test_gpu_ready_retries_a_card_still_waking(mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/nvidia-smi')
-    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.time', monotonic=time.monotonic)
     run = mocker.patch('sbclaude.container.sp.run',
                        side_effect=[
                            sp.CalledProcessError(9, 'nvidia-smi'),
@@ -862,7 +863,7 @@ def test_gpu_ready_retries_a_card_still_waking(mocker: MockerFixture) -> None:
      OSError('gone')])
 def test_gpu_ready_gives_up(outcome: Exception, mocker: MockerFixture) -> None:
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/nvidia-smi')
-    sleep = mocker.patch('sbclaude.container.time.sleep')
+    sleep = mocker.patch('sbclaude.container.time', monotonic=time.monotonic).sleep
     run = mocker.patch('sbclaude.container.sp.run', side_effect=outcome)
     assert container.gpu_ready() is False
     assert run.call_count == 3
@@ -2168,7 +2169,7 @@ def test_run_does_not_blame_the_tui_for_opencode(capsys: pytest.CaptureFixture[s
     mocker.patch('sbclaude.container.which', return_value='/usr/bin/opencode')
     mocker.patch('sbclaude.container.Path.home', return_value=tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
-    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.time', monotonic=time.monotonic)
     mocker.patch('sbclaude.container.syslog.syslog')
     docker_run(1)
     project = tmp_path / 'p'
@@ -2391,7 +2392,7 @@ def test_run_gentoo_removes_the_env_file_after_every_attempt(docker_run: Callabl
                                                              tmp_path: Path) -> None:
     _, _, _, project = _gentoo_host(mocker, tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
-    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.time', monotonic=time.monotonic)
     mocker.patch('sbclaude.container.syslog.syslog')
     client = _state_client(mocker)
     client.containers.get.side_effect = docker.errors.NotFound('gone')
@@ -2465,7 +2466,7 @@ def test_run_gentoo_does_not_save_a_box_that_never_started(docker_run: Callable[
                                                            tmp_path: Path) -> None:
     _, _, _, project = _gentoo_host(mocker, tmp_path)
     mocker.patch('sbclaude.container.ensure_image')
-    mocker.patch('sbclaude.container.time.sleep')
+    mocker.patch('sbclaude.container.time', monotonic=time.monotonic)
     mocker.patch('sbclaude.container.syslog.syslog')
     client = _state_client(mocker)
     # The first attempt created a container that died at once; the others never got that far.
