@@ -153,6 +153,7 @@ libmpg
 libnss
 libnvidia
 libpulse
+librsvg
 libsecret
 libsonnet
 libsox
@@ -252,6 +253,7 @@ riscv
 rmse
 rsbuild
 rstcheck
+rsvg
 rustc
 rustup
 sbclaude
