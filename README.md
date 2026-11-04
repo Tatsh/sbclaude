@@ -51,12 +51,13 @@ Four images are built on demand from one Dockerfile. `sbclaude:latest` runs Clau
 `sbclaude:opencode` runs opencode, `sbclaude:muse` runs Muse Code, and `sbclaude:codex` runs Codex.
 They share every layer except the last, where the Claude Code image adds its managed settings and
 cc-session-recover. All bundle everyday coding tools (Debian slim + git, ripgrep, Node 24/Yarn, a C
-toolchain, gh, glab, uv, jq), formatters and linters kept at their latest upstream release
-(clang-format, jsonnet, jsonnetfmt, shellcheck), Qt 6 development (`qt6-base-dev` plus ninja), a
-Rust toolchain (rustup stable with the `wasm32-unknown-unknown` target and `cargo bin`, for
-repositories that build WebAssembly), `webshot` (a GPU Chrome driver for screenshots and visual
-diffs, with Chromium built in), and a mobile reverse-engineering toolchain (a JDK, frida, mitmproxy,
-dex2jar, baksmali/smali, and launchers for the host-mounted Ghidra, Android SDK, jadx, and apktool).
+toolchain, gh with gh-actions-lock, glab, uv, jq), formatters and linters kept at their latest
+upstream release (clang-format, jsonnet, jsonnetfmt, shellcheck), Qt 6 development (`qt6-base-dev`
+plus ninja), a Rust toolchain (rustup stable with the `wasm32-unknown-unknown` target and
+`cargo bin`, for repositories that build WebAssembly), `webshot` (a GPU Chrome driver for
+screenshots and visual diffs, with Chromium built in), and a mobile reverse-engineering toolchain
+(a JDK, frida, mitmproxy, dex2jar, baksmali/smali, and launchers for the host-mounted Ghidra,
+Android SDK, jadx, and apktool).
 
 Cargo keeps its registry in `$HOME/.cargo`, which is part of the box and goes away with it, so a
 Rust build starts from an empty cache each time. Add `rw = ["~/.cargo"]` to keep the downloaded

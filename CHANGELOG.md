@@ -11,6 +11,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The Debian images include the `gh-actions-lock` extension for `gh`.
 - `--desktop` (config key `desktop`) forwards the host desktop session into the box. The
   agent can see and control the session. `--desktop` forwards the Wayland socket, the D-Bus
   session bus, and the PipeWire sockets together, and screen capture and input travel over

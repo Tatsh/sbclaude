@@ -215,6 +215,13 @@ RUN set -eux; \
         | tar -xJ -C /tmp shellcheck-stable/shellcheck; \
     install -m 0755 /tmp/shellcheck-stable/shellcheck /usr/local/bin/shellcheck; \
     rm -rf /tmp/go-jsonnet.tar.gz /tmp/shellcheck-stable
+# gh-actions-lock, which Wiswa invokes as `gh actions-lock`. gh loads extensions from the data
+# directory of the user, and that user does not exist until run time, so the entrypoint links this
+# directory there.
+RUN install -d /opt/gh-actions-lock \
+    && curl -fsSL -o /opt/gh-actions-lock/gh-actions-lock \
+        https://github.com/github/gh-actions-lock/releases/latest/download/linux-amd64 \
+    && chmod 0755 /opt/gh-actions-lock/gh-actions-lock
 # webshot: GPU browser screenshots and visual diffs, available in every box.
 # Chromium and its headless shell are baked in at build time (PLAYWRIGHT_BROWSERS_PATH) so no
 # project needs a per-repo browser download. `playwright install-deps` is not used: the runtime

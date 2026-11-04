@@ -230,6 +230,17 @@ else
     chown -R "$HOST_UID:$HOST_GID" "$HOST_HOME/.local" 2>/dev/null || true
 fi
 
+# The Gentoo image does not include the extension, and a mounted data directory may already have it.
+GH_EXTENSIONS=.local/share/gh/extensions
+if [ -d /opt/gh-actions-lock ] && [ ! -e "$HOST_HOME/$GH_EXTENSIONS/gh-actions-lock" ]; then
+    for _dir in .local .local/share .local/share/gh "$GH_EXTENSIONS"; do
+        mkdir -p "$HOST_HOME/$_dir"
+        chown "$HOST_UID:$HOST_GID" "$HOST_HOME/$_dir" 2>/dev/null || true
+    done
+    ln -s /opt/gh-actions-lock "$HOST_HOME/$GH_EXTENSIONS/gh-actions-lock"
+    chown -h "$HOST_UID:$HOST_GID" "$HOST_HOME/$GH_EXTENSIONS/gh-actions-lock" 2>/dev/null || true
+fi
+
 # Inject the no-prompt flag unless explicitly disabled (SBCLAUDE_SKIP_PERMISSIONS=0).
 SKIP_FLAG=()
 if [ "${SBCLAUDE_SKIP_PERMISSIONS:-1}" = "1" ]; then
