@@ -135,6 +135,7 @@ libasound
 libatk
 libatspi
 libcairo
+libegl
 libera
 libfontconfig
 libfreetype
@@ -147,6 +148,7 @@ libgmp
 libgsl
 libisl
 libjsonnet
+libltdl
 libmpc
 libmpfr
 libmpg

@@ -34,6 +34,7 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
     && apt-get update && apt-get install -y --no-install-recommends \
           ninja-build \
         autoconf \
+        autoconf-archive \
         automake \
         bison \
         build-essential \
@@ -42,6 +43,7 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         docker-compose-plugin \
         extra-cmake-modules \
         flex \
+        gdb \
         gettext \
         gh \
         gir1.2-glib-2.0 \
@@ -54,15 +56,24 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         libatk1.0-0t64 \
         libatspi2.0-0t64 \
         libcairo2-dev \
+        libegl-dev \
         libffi-dev \
         libgirepository-2.0-dev \
         libgmp-dev \
         libgsl-dev \
         libisl-dev \
+        libltdl-dev \
         libmpc-dev \
         libmpfr-dev \
         libtool \
         libwayland-dev \
+        libxcursor-dev \
+        libxfixes-dev \
+        libxi-dev \
+        libxkbcommon-dev \
+        libxrandr-dev \
+        libxss-dev \
+        libxtst-dev \
         locales \
         m4 \
         nodejs \
@@ -78,6 +89,8 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         sudo \
         texinfo \
         tini \
+        wayland-protocols \
+        zip \
     && corepack enable yarn \
     && sed -i 's/^# *\(en_GB.UTF-8\)/\1/' /etc/locale.gen && locale-gen \
     && python3 -m venv /opt/venv \
