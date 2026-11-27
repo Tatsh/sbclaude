@@ -4,12 +4,12 @@ requires = ["hatchling"]
 
 [dependency-groups]
 dev = [
-  "commitizen>=4.19.0",
+  "commitizen>=4.19.4",
   "cz-path>=0.0.7",
-  "mypy>=2.3.1",
-  "ruff==0.17.5",
-  "ty>=0.0.84",
-  "types-docker>=7.2.0.20260923",
+  "mypy>=2.4.1",
+  "ruff==0.17.6",
+  "ty>=0.0.107",
+  "types-docker>=7.2.0.20261102",
   "yapf>=0.43.0"
 ]
 docs = [
@@ -20,15 +20,15 @@ docs = [
   "restructuredtext-lint>=2.0.2",
   "sphinx-click>=6.2.0",
   "sphinx-datatables>=1.0.0",
-  "sphinx-immaterial>=0.13.9",
-  "sphinx>=9.1.0; python_version >= \"3.13\""
+  "sphinx-immaterial>=0.13.12",
+  "sphinx>=9.2.0; python_version >= \"3.13\""
 ]
 tests = [
   "coveralls>=4.1.0",
   "mock>=5.2.0",
   "pytest-cov>=7.1.0",
-  "pytest-mock>=3.16.0",
-  "pytest>=9.1.1"
+  "pytest-mock>=3.17.0",
+  "pytest>=9.2.0"
 ]
 
 [project]
@@ -45,10 +45,10 @@ classifiers = [
 ]
 dependencies = [
   "bascom>=0.2.0",
-  "click>=8.5.0",
+  "click>=8.5.1",
   "docker>=7.2.0",
-  "platformdirs>=4.12.0",
-  "tomlkit>=0.15.1",
+  "platformdirs>=4.14.7",
+  "tomlkit>=0.15.2",
   "typing-extensions>=4.16.0"
 ]
 description = "Run Claude Code in a throwaway Docker container."
@@ -56,7 +56,7 @@ keywords = ["android", "claude", "docker", "ghidra", "reverse engineering", "san
 license = "MIT"
 name = "sbclaude"
 readme = "README.md"
-requires-python = ">=3.11,<4.0"
+requires-python = ">=3.11.5,<4.0"
 version = "0.3.0"
 
 [[project.authors]]
